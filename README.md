@@ -34,9 +34,3 @@ ExpenseNotebook/
 ├── gradlew.bat
 └── .gitignore
 ```
-2. Open the repository's **Actions** tab.
-3. Select **Build Android APK**.
-4. Select **Run workflow** and wait for the build to finish.
-5. Open the completed workflow run and download **ExpenseNotebook-debug-apk** from the **Artifacts** section.
-
-The workflow also builds automatically whenever code is pushed to the `main` branch.
