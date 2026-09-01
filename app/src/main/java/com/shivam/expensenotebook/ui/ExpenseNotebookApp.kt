@@ -3,6 +3,12 @@ package com.shivam.expensenotebook.ui
 import android.app.DatePickerDialog
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,11 +23,15 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -146,7 +156,7 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
         topBar = {
             AppHeader(
                 title = when (screen) {
-                    SCREEN_HOME -> "Expense Notebook"
+                    SCREEN_HOME -> "My Expenses"
                     SCREEN_HISTORY -> "History"
                     SCREEN_STATS -> "Statistics"
                     SCREEN_BUDGET -> "Monthly Budget"
@@ -164,7 +174,16 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
             }
         }
     ) { innerPadding ->
-        when (screen) {
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                (slideInHorizontally(animationSpec = tween(160)) { it / 12 } +
+                    fadeIn(animationSpec = tween(140))) togetherWith
+                    fadeOut(animationSpec = tween(100))
+            },
+            label = "screen transition"
+        ) { currentScreen ->
+        when (currentScreen) {
             SCREEN_HOME -> HomeScreen(
                 state = state,
                 contentPadding = innerPadding,
@@ -178,7 +197,9 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
                     returnScreen = SCREEN_HOME
                     screen = SCREEN_ADD
                 },
-                onCategories = { screen = SCREEN_CATEGORIES }
+                onCategories = { screen = SCREEN_CATEGORIES },
+                onHistory = { screen = SCREEN_HISTORY },
+                onStatistics = { screen = SCREEN_STATS }
             )
 
             SCREEN_HISTORY -> HistoryScreen(
@@ -217,6 +238,7 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
                 }
             )
         }
+        }
     }
 }
 
@@ -226,6 +248,7 @@ private fun AppHeader(title: String, showBack: Boolean, onBack: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .height(58.dp)
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -257,6 +280,7 @@ private fun BottomBar(selected: String, onSelect: (String) -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -283,7 +307,9 @@ private fun HomeScreen(
     contentPadding: PaddingValues,
     onAdd: () -> Unit,
     onEdit: (Long) -> Unit,
-    onCategories: () -> Unit
+    onCategories: () -> Unit,
+    onHistory: () -> Unit,
+    onStatistics: () -> Unit
 ) {
     val today = LocalDate.now()
     val month = YearMonth.from(today)
@@ -313,15 +339,29 @@ private fun HomeScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SummaryCard("Today", formatMoney(todayTotal), Modifier.weight(1f))
-                SummaryCard("This month", formatMoney(monthTotal), Modifier.weight(1f))
+                SummaryCard(
+                    "Today",
+                    formatMoney(todayTotal),
+                    Modifier.weight(1f),
+                    accent = Color(0xFF1976D2),
+                    onClick = onHistory
+                )
+                SummaryCard(
+                    "This month",
+                    formatMoney(monthTotal),
+                    Modifier.weight(1f),
+                    accent = Color(0xFFF57C00),
+                    onClick = onStatistics
+                )
             }
         }
         item {
             SummaryCard(
                 label = "Expenses this month",
                 value = monthExpenses.size.toString(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                accent = Color(0xFF7B1FA2),
+                onClick = onHistory
             )
         }
         item {
@@ -335,7 +375,7 @@ private fun HomeScreen(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = onCategories) { Text("Manage categories") }
+                TextButton(onClick = onHistory) { Text("View all") }
             }
         }
         if (state.expenses.isEmpty()) {
@@ -345,14 +385,29 @@ private fun HomeScreen(
                 ExpenseRow(expense = expense, onClick = { onEdit(expense.id) })
             }
         }
+        item {
+            OutlinedButton(onClick = onCategories, modifier = Modifier.fillMaxWidth()) {
+                Text("Manage Categories")
+            }
+        }
     }
 }
 
 @Composable
-private fun SummaryCard(label: String, value: String, modifier: Modifier = Modifier) {
-    ElevatedCard(modifier = modifier) {
+private fun SummaryCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    accent: Color = MaterialTheme.colorScheme.primary,
+    onClick: (() -> Unit)? = null
+) {
+    val clickableModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
+    ElevatedCard(
+        modifier = clickableModifier,
+        colors = CardDefaults.elevatedCardColors(containerColor = accent.copy(alpha = 0.13f))
+    ) {
         Column(Modifier.padding(16.dp)) {
-            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, color = accent, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
             Text(
                 value,
@@ -369,18 +424,28 @@ private fun ExpenseRow(
     onClick: () -> Unit,
     actions: (@Composable () -> Unit)? = null
 ) {
+    val accent = categoryColor(expense.categoryName)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.12f))
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text(
-                "${formatMoney(expense.amountMinor)} • ${expense.categoryName} • ${formatDate(expense.date)}",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .background(accent, CircleShape)
+                )
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    "${formatMoney(expense.amountMinor)} • ${expense.categoryName} • ${formatDate(expense.date)}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+            }
             if (expense.note.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -525,16 +590,17 @@ private fun CategoryChoice(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val accent = categoryColor(category.name)
     Surface(
         modifier = modifier
             .defaultMinSize(minHeight = 52.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (selected) accent else accent.copy(alpha = 0.13f),
+        contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(
             1.dp,
-            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+            if (selected) accent else accent.copy(alpha = 0.45f)
         )
     ) {
         Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
@@ -755,7 +821,9 @@ private fun StatisticsScreen(state: ExpenseUiState, contentPadding: PaddingValue
                         Spacer(Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = fraction.coerceIn(0f, 1f),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            color = categoryColor(category),
+                            trackColor = categoryColor(category).copy(alpha = 0.18f)
                         )
                         Spacer(Modifier.height(5.dp))
                         Text(
@@ -860,7 +928,9 @@ private fun BudgetOverview(
                 Text("Savings goal progress", style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(
                     progress = savingsProgress.coerceIn(0f, 1f),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF2E7D32),
+                    trackColor = Color(0xFF2E7D32).copy(alpha = 0.18f)
                 )
                 Text(
                     "${(savingsProgress * 100).toInt().coerceAtLeast(0)}%",
@@ -872,7 +942,9 @@ private fun BudgetOverview(
                 Text("Budget used", style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(
                     progress = budgetProgress.coerceIn(0f, 1f),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFFF57C00),
+                    trackColor = Color(0xFFF57C00).copy(alpha = 0.18f)
                 )
                 Text(
                     "${formatMoney(spent)} of ${formatMoney(budget)}",
@@ -1061,3 +1133,19 @@ private fun parseAmountAllowZero(value: String): Long? {
 }
 
 private fun parseOptionalAmount(value: String): Long = parseAmountAllowZero(value) ?: 0L
+
+private val CategoryColors = listOf(
+    Color(0xFF1565C0),
+    Color(0xFFEF6C00),
+    Color(0xFF2E7D32),
+    Color(0xFF7B1FA2),
+    Color(0xFFC62828),
+    Color(0xFF00838F),
+    Color(0xFF5D4037),
+    Color(0xFF455A64)
+)
+
+private fun categoryColor(categoryName: String): Color {
+    val index = (categoryName.hashCode() and Int.MAX_VALUE) % CategoryColors.size
+    return CategoryColors[index]
+}

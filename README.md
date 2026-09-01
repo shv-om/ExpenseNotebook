@@ -18,6 +18,10 @@ ExpenseNotebook/
 │       │   ├── data/ExpenseData.kt
 │       │   └── ui/ExpenseNotebookApp.kt
 │       └── res/
+│           ├── drawable/ic_launcher_foreground.xml
+│           ├── mipmap-anydpi-v26/ic_launcher.xml
+│           ├── mipmap-anydpi-v26/ic_launcher_round.xml
+│           ├── values/colors.xml
 │           ├── values/strings.xml
 │           ├── values/themes.xml
 │           └── values-night/themes.xml
