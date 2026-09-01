@@ -12,17 +12,18 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,17 +31,27 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -49,8 +60,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -70,13 +79,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.shivam.expensenotebook.ExpenseUiState
 import com.shivam.expensenotebook.ExpenseViewModel
 import com.shivam.expensenotebook.data.CURRENCY_CODE
 import com.shivam.expensenotebook.data.Category
 import com.shivam.expensenotebook.data.Expense
 import com.shivam.expensenotebook.data.MonthlySettings
+import com.shivam.expensenotebook.ui.theme.LocalFinanceColors
+import com.shivam.expensenotebook.ui.theme.categoryColor
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.NumberFormat
@@ -94,36 +104,6 @@ private const val SCREEN_STATS = "statistics"
 private const val SCREEN_BUDGET = "budget"
 private const val SCREEN_CATEGORIES = "categories"
 private const val SCREEN_ADD = "add"
-
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF8A4E00),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDCB5),
-    onPrimaryContainer = Color(0xFF2C1600),
-    secondary = Color(0xFF6F5B40),
-    background = Color(0xFFFFF8F2),
-    surface = Color(0xFFFFF8F2),
-    surfaceVariant = Color(0xFFF2E5D5)
-)
-
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFFB86B),
-    onPrimary = Color(0xFF492900),
-    primaryContainer = Color(0xFF693C00),
-    onPrimaryContainer = Color(0xFFFFDCB5),
-    secondary = Color(0xFFDDC2A0),
-    background = Color(0xFF161310),
-    surface = Color(0xFF161310),
-    surfaceVariant = Color(0xFF514538)
-)
-
-@Composable
-fun ExpenseNotebookTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
-        content = content
-    )
-}
 
 @Composable
 fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
@@ -145,23 +125,30 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
     }
 
     if (state.isLoading) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
         return
     }
 
+    fun openAddExpense(from: String) {
+        editingExpenseId = null
+        returnScreen = from
+        screen = SCREEN_ADD
+    }
+
     val mainScreens = setOf(SCREEN_HOME, SCREEN_HISTORY, SCREEN_STATS, SCREEN_BUDGET)
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AppHeader(
                 title = when (screen) {
-                    SCREEN_HOME -> "My Expenses"
-                    SCREEN_HISTORY -> "History"
+                    SCREEN_HOME -> "Overview"
+                    SCREEN_HISTORY -> "Transactions"
                     SCREEN_STATS -> "Statistics"
-                    SCREEN_BUDGET -> "Monthly Budget"
+                    SCREEN_BUDGET -> "Monthly plan"
                     SCREEN_CATEGORIES -> "Categories"
-                    SCREEN_ADD -> if (editingExpenseId == null) "Add Expense" else "Edit Expense"
+                    SCREEN_ADD -> if (editingExpenseId == null) "Add expense" else "Edit expense"
                     else -> "Expense Notebook"
                 },
                 showBack = screen !in mainScreens,
@@ -170,97 +157,91 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
         },
         bottomBar = {
             if (screen in mainScreens) {
-                BottomBar(screen) { screen = it }
+                BottomBar(
+                    selected = screen,
+                    onSelect = { screen = it },
+                    onAdd = { openAddExpense(screen) }
+                )
             }
         }
     ) { innerPadding ->
         AnimatedContent(
             targetState = screen,
             transitionSpec = {
-                (slideInHorizontally(animationSpec = tween(160)) { it / 12 } +
-                    fadeIn(animationSpec = tween(140))) togetherWith
-                    fadeOut(animationSpec = tween(100))
+                (slideInHorizontally(animationSpec = tween(140)) { it / 14 } +
+                    fadeIn(animationSpec = tween(120))) togetherWith
+                    fadeOut(animationSpec = tween(90))
             },
-            label = "screen transition"
+            label = "screen"
         ) { currentScreen ->
-        when (currentScreen) {
-            SCREEN_HOME -> HomeScreen(
-                state = state,
-                contentPadding = innerPadding,
-                onAdd = {
-                    editingExpenseId = null
-                    returnScreen = SCREEN_HOME
-                    screen = SCREEN_ADD
-                },
-                onEdit = {
-                    editingExpenseId = it
-                    returnScreen = SCREEN_HOME
-                    screen = SCREEN_ADD
-                },
-                onCategories = { screen = SCREEN_CATEGORIES },
-                onHistory = { screen = SCREEN_HISTORY },
-                onStatistics = { screen = SCREEN_STATS }
-            )
+            when (currentScreen) {
+                SCREEN_HOME -> HomeScreen(
+                    state = state,
+                    contentPadding = innerPadding,
+                    onEdit = { id ->
+                        editingExpenseId = id
+                        returnScreen = SCREEN_HOME
+                        screen = SCREEN_ADD
+                    },
+                    onHistory = { screen = SCREEN_HISTORY },
+                    onStatistics = { screen = SCREEN_STATS },
+                    onBudget = { screen = SCREEN_BUDGET },
+                    onCategories = { screen = SCREEN_CATEGORIES }
+                )
 
-            SCREEN_HISTORY -> HistoryScreen(
-                state = state,
-                contentPadding = innerPadding,
-                onEdit = {
-                    editingExpenseId = it
-                    returnScreen = SCREEN_HISTORY
-                    screen = SCREEN_ADD
-                },
-                onDelete = viewModel::deleteExpense
-            )
+                SCREEN_HISTORY -> HistoryScreen(
+                    state = state,
+                    contentPadding = innerPadding,
+                    onEdit = { id ->
+                        editingExpenseId = id
+                        returnScreen = SCREEN_HISTORY
+                        screen = SCREEN_ADD
+                    },
+                    onDelete = viewModel::deleteExpense
+                )
 
-            SCREEN_STATS -> StatisticsScreen(state, innerPadding)
-            SCREEN_BUDGET -> BudgetScreen(
-                state = state,
-                contentPadding = innerPadding,
-                onSave = viewModel::saveSettings
-            )
+                SCREEN_STATS -> StatisticsScreen(state, innerPadding)
+                SCREEN_BUDGET -> BudgetScreen(state, innerPadding, viewModel::saveSettings)
+                SCREEN_CATEGORIES -> CategoriesScreen(
+                    categories = state.categories,
+                    contentPadding = innerPadding,
+                    onAdd = viewModel::addCategory,
+                    onRename = viewModel::renameCategory,
+                    onDelete = viewModel::deleteCategory
+                )
 
-            SCREEN_CATEGORIES -> CategoriesScreen(
-                categories = state.categories,
-                contentPadding = innerPadding,
-                onAdd = viewModel::addCategory,
-                onRename = viewModel::renameCategory,
-                onDelete = viewModel::deleteCategory
-            )
-
-            SCREEN_ADD -> AddExpenseScreen(
-                expense = editingExpenseId?.let { id -> state.expenses.firstOrNull { it.id == id } },
-                categories = state.categories,
-                contentPadding = innerPadding,
-                onSave = { id, amount, categoryId, date, note ->
-                    viewModel.saveExpense(id, amount, categoryId, date, note)
-                    screen = returnScreen
-                }
-            )
-        }
+                SCREEN_ADD -> AddExpenseScreen(
+                    expense = editingExpenseId?.let { id -> state.expenses.firstOrNull { it.id == id } },
+                    categories = state.categories,
+                    contentPadding = innerPadding,
+                    onSave = { id, amount, categoryId, date, note ->
+                        viewModel.saveExpense(id, amount, categoryId, date, note)
+                        screen = returnScreen
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun AppHeader(title: String, showBack: Boolean, onBack: () -> Unit) {
-    Surface(tonalElevation = 2.dp) {
+    Surface(color = MaterialTheme.colorScheme.background) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .height(58.dp)
-                .padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showBack) {
-                TextButton(onClick = onBack) { Text("‹ Back", fontSize = 17.sp) }
-                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+            } else {
+                Spacer(Modifier.width(8.dp))
             }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -269,35 +250,44 @@ private fun AppHeader(title: String, showBack: Boolean, onBack: () -> Unit) {
 }
 
 @Composable
-private fun BottomBar(selected: String, onSelect: (String) -> Unit) {
-    val items = listOf(
-        SCREEN_HOME to "Home",
-        SCREEN_HISTORY to "History",
-        SCREEN_STATS to "Statistics",
-        SCREEN_BUDGET to "Budget"
-    )
-    Surface(tonalElevation = 4.dp) {
+private fun BottomBar(selected: String, onSelect: (String) -> Unit, onAdd: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 5.dp, tonalElevation = 1.dp) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items.forEach { (screen, label) ->
-                TextButton(
-                    onClick = { onSelect(screen) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        label,
-                        fontWeight = if (selected == screen) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected == screen) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            BottomItem("Home", Icons.Default.Home, selected == SCREEN_HOME) { onSelect(SCREEN_HOME) }
+            BottomItem("Transactions", Icons.Default.List, selected == SCREEN_HISTORY) { onSelect(SCREEN_HISTORY) }
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                FloatingActionButton(
+                    onClick = onAdd,
+                    modifier = Modifier.size(50.dp),
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) { Icon(Icons.Default.Add, contentDescription = "Add expense") }
             }
+            BottomItem("Stats", Icons.Default.Info, selected == SCREEN_STATS) { onSelect(SCREEN_STATS) }
+            BottomItem("Budget", Icons.Default.Settings, selected == SCREEN_BUDGET) { onSelect(SCREEN_BUDGET) }
         }
+    }
+}
+
+@Composable
+private fun RowScope.BottomItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier = Modifier.weight(1f).height(56.dp).clickable(onClick = onClick).padding(top = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Icon(icon, contentDescription = label, modifier = Modifier.size(21.dp), tint = color)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1)
     }
 }
 
@@ -305,159 +295,268 @@ private fun BottomBar(selected: String, onSelect: (String) -> Unit) {
 private fun HomeScreen(
     state: ExpenseUiState,
     contentPadding: PaddingValues,
-    onAdd: () -> Unit,
     onEdit: (Long) -> Unit,
-    onCategories: () -> Unit,
     onHistory: () -> Unit,
-    onStatistics: () -> Unit
+    onStatistics: () -> Unit,
+    onBudget: () -> Unit,
+    onCategories: () -> Unit
 ) {
-    val today = LocalDate.now()
-    val month = YearMonth.from(today)
-    val todayTotal = state.expenses.filter { it.date == today }.sumOf { it.amountMinor }
+    val month = YearMonth.now()
     val monthExpenses = state.expenses.filter { YearMonth.from(it.date) == month }
-    val monthTotal = monthExpenses.sumOf { it.amountMinor }
+    val spent = monthExpenses.sumOf { it.amountMinor }
+    val income = state.settings.incomeMinor
+    val balance = income - spent
+    val budget = state.settings.budgetMinor
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 16.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Button(
-                onClick = onAdd,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text("+  Add Expense", style = MaterialTheme.typography.titleMedium)
-            }
-        }
+        item { BalanceCard(balance, spent, budget, onBudget) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SummaryCard(
-                    "Today",
-                    formatMoney(todayTotal),
+                FinanceSummaryCard(
+                    "Planned income",
+                    income,
+                    "Monthly plan",
+                    true,
                     Modifier.weight(1f),
-                    accent = Color(0xFF1976D2),
-                    onClick = onHistory
+                    onBudget
                 )
-                SummaryCard(
-                    "This month",
-                    formatMoney(monthTotal),
+                FinanceSummaryCard(
+                    "Expenses",
+                    spent,
+                    "${monthExpenses.size} this month",
+                    false,
                     Modifier.weight(1f),
-                    accent = Color(0xFFF57C00),
-                    onClick = onStatistics
+                    onStatistics
                 )
             }
         }
-        item {
-            SummaryCard(
-                label = "Expenses this month",
-                value = monthExpenses.size.toString(),
-                modifier = Modifier.fillMaxWidth(),
-                accent = Color(0xFF7B1FA2),
-                onClick = onHistory
-            )
-        }
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Recent expenses",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onHistory) { Text("View all") }
-            }
-        }
+        item { SectionHeader("Recent transactions", "See all", onHistory) }
         if (state.expenses.isEmpty()) {
-            item { EmptyMessage("No expenses yet. Tap Add Expense to begin.") }
+            item { EmptyState("No expenses yet", "Use the + button to record your first expense.") }
         } else {
-            items(state.expenses.take(6), key = { it.id }) { expense ->
-                ExpenseRow(expense = expense, onClick = { onEdit(expense.id) })
+            items(state.expenses.take(5), key = { it.id }) { expense ->
+                TransactionRow(expense, { onEdit(expense.id) })
             }
+        }
+        if (budget > 0L) {
+            item { SectionHeader("Budget overview", "Open", onBudget) }
+            item { BudgetPreview(spent, budget, onBudget) }
         }
         item {
-            OutlinedButton(onClick = onCategories, modifier = Modifier.fillMaxWidth()) {
-                Text("Manage Categories")
+            TextButton(onClick = onCategories, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Text("Manage expense categories")
             }
         }
     }
 }
 
 @Composable
-private fun SummaryCard(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    accent: Color = MaterialTheme.colorScheme.primary,
-    onClick: (() -> Unit)? = null
-) {
-    val clickableModifier = if (onClick == null) modifier else modifier.clickable(onClick = onClick)
-    ElevatedCard(
-        modifier = clickableModifier,
-        colors = CardDefaults.elevatedCardColors(containerColor = accent.copy(alpha = 0.13f))
+private fun BalanceCard(balance: Long, spent: Long, budget: Long, onClick: () -> Unit) {
+    val finance = LocalFinanceColors.current
+    val balanceColor = if (balance < 0L) finance.expense else MaterialTheme.colorScheme.onSurface
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 1.dp
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(label, color = accent, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(6.dp))
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("Available this month", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                value,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                formatMoney(balance),
+                style = MaterialTheme.typography.headlineMedium,
+                color = balanceColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            Text(
+                "Planned income minus this month’s expenses",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (budget > 0L) {
+                val ratio = spent.toFloat() / budget.toFloat()
+                val tone = budgetTone(ratio)
+                Spacer(Modifier.height(3.dp))
+                LinearProgressIndicator(
+                    progress = ratio.coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    color = tone,
+                    trackColor = tone.copy(alpha = 0.15f)
+                )
+                Text(
+                    "${(ratio * 100).toInt()}% of spending budget used",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tone
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ExpenseRow(
-    expense: Expense,
-    onClick: () -> Unit,
-    actions: (@Composable () -> Unit)? = null
+private fun FinanceSummaryCard(
+    label: String,
+    value: Long,
+    supporting: String,
+    positive: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
 ) {
-    val accent = categoryColor(expense.categoryName)
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.12f))
+    val finance = LocalFinanceColors.current
+    val accent = if (positive) finance.income else finance.expense
+    val container = if (positive) finance.incomeContainer else finance.expenseContainer
+    Surface(
+        modifier = modifier.heightIn(min = 102.dp).clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(10.dp)
-                        .background(accent, CircleShape)
-                )
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    "${formatMoney(expense.amountMinor)} • ${expense.categoryName} • ${formatDate(expense.date)}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
+                Box(Modifier.size(8.dp).background(accent, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (expense.note.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
+            Text(
+                formatMoney(value),
+                style = MaterialTheme.typography.titleLarge,
+                color = accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Surface(shape = CircleShape, color = container) {
                 Text(
-                    expense.note,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    supporting,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = accent,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            actions?.let {
-                Spacer(Modifier.height(6.dp))
-                it()
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, action: String? = null, onAction: (() -> Unit)? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        if (action != null && onAction != null) {
+            TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = 6.dp)) { Text(action) }
+        }
+    }
+}
+
+@Composable
+private fun TransactionRow(expense: Expense, onClick: () -> Unit, onDelete: (() -> Unit)? = null) {
+    val finance = LocalFinanceColors.current
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 9.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CategoryAvatar(expense.categoryName)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    expense.note.ifBlank { expense.categoryName },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${expense.categoryName} · ${formatRelativeDate(expense.date)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "-${formatMoney(expense.amountMinor)}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = finance.expense,
+                maxLines = 1
+            )
+            if (onDelete != null) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete expense",
+                        modifier = Modifier.size(19.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryAvatar(categoryName: String) {
+    val color = categoryColor(categoryName)
+    Surface(shape = CircleShape, color = color.copy(alpha = 0.13f), modifier = Modifier.size(40.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                categoryMonogram(categoryName),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+        }
+    }
+}
+
+@Composable
+private fun BudgetPreview(spent: Long, budget: Long, onClick: () -> Unit) {
+    val remaining = budget - spent
+    val ratio = if (budget <= 0L) 0f else spent.toFloat() / budget.toFloat()
+    val tone = budgetTone(ratio)
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row {
+                Text("Monthly spending", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("${formatMoney(spent)} / ${formatMoney(budget)}", fontWeight = FontWeight.SemiBold)
+            }
+            LinearProgressIndicator(
+                progress = ratio.coerceIn(0f, 1f),
+                modifier = Modifier.fillMaxWidth(),
+                color = tone,
+                trackColor = tone.copy(alpha = 0.15f)
+            )
+            Row {
+                Text("${(ratio * 100).toInt()}% used", style = MaterialTheme.typography.bodySmall, color = tone)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (remaining >= 0L) "${formatMoney(remaining)} remaining" else "${formatMoney(-remaining)} over budget",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tone
+                )
             }
         }
     }
@@ -471,6 +570,7 @@ private fun AddExpenseScreen(
     onSave: (Long?, Long, Long, Long, String) -> Unit
 ) {
     val context = LocalContext.current
+    val finance = LocalFinanceColors.current
     val focusRequester = remember { FocusRequester() }
     var amountText by rememberSaveable(expense?.id) {
         mutableStateOf(expense?.amountMinor?.let(::amountForInput).orEmpty())
@@ -485,51 +585,49 @@ private fun AddExpenseScreen(
     var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedDate = LocalDate.ofEpochDay(dateEpochDay)
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 24.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        item {
+            Surface(shape = CircleShape, color = finance.expenseContainer) {
+                Text(
+                    "Expense",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = finance.expense
+                )
+            }
+        }
         item {
             OutlinedTextField(
                 value = amountText,
                 onValueChange = {
-                    amountText = it.filter { character -> character.isDigit() || character == '.' }
+                    amountText = sanitizeMoneyInput(it)
                     validationError = null
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester),
-                label = { Text("Amount (₹)") },
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                label = { Text("Amount") },
+                prefix = { Text("₹ ") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 isError = validationError != null,
-                supportingText = { validationError?.let { Text(it) } }
+                supportingText = { validationError?.let { Text(it) } },
+                shape = MaterialTheme.shapes.medium
             )
         }
-        item {
-            Text("Category", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        }
+        item { Text("Category", style = MaterialTheme.typography.titleSmall) }
         items(categories.chunked(2)) { rowCategories ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowCategories.forEach { category ->
                     CategoryChoice(
-                        category = category,
-                        selected = category.id == categoryId,
-                        onClick = { categoryId = category.id },
-                        modifier = Modifier.weight(1f)
+                        category,
+                        category.id == categoryId,
+                        { categoryId = category.id },
+                        Modifier.weight(1f)
                     )
                 }
                 if (rowCategories.size == 1) Spacer(Modifier.weight(1f))
@@ -540,18 +638,15 @@ private fun AddExpenseScreen(
                 onClick = {
                     DatePickerDialog(
                         context,
-                        { _, year, month, day ->
-                            dateEpochDay = LocalDate.of(year, month + 1, day).toEpochDay()
-                        },
+                        { _, year, month, day -> dateEpochDay = LocalDate.of(year, month + 1, day).toEpochDay() },
                         selectedDate.year,
                         selectedDate.monthValue - 1,
                         selectedDate.dayOfMonth
                     ).show()
                 },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Date: ${formatDate(selectedDate)}")
-            }
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) { Text("Date · ${formatDate(selectedDate)}") }
         }
         item {
             OutlinedTextField(
@@ -559,52 +654,47 @@ private fun AddExpenseScreen(
                 onValueChange = { if (it.length <= 120) note = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Note (optional)") },
-                singleLine = true
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
             )
         }
         item {
             Button(
                 onClick = {
-                    val amountMinor = parseAmount(amountText)
+                    val amount = parseAmount(amountText)
                     when {
-                        amountMinor == null -> validationError = "Enter a valid amount greater than zero."
+                        amount == null -> validationError = "Enter an amount greater than zero."
                         categoryId == null -> validationError = "Select a category."
-                        else -> onSave(expense?.id, amountMinor, categoryId!!, dateEpochDay, note)
+                        else -> onSave(expense?.id, amount, categoryId!!, dateEpochDay, note)
                     }
                 },
                 enabled = categories.isNotEmpty(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-            ) {
-                Text(if (expense == null) "Save Expense" else "Save Changes")
-            }
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) { Text(if (expense == null) "Save expense" else "Save changes") }
         }
     }
 }
 
 @Composable
-private fun CategoryChoice(
-    category: Category,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun CategoryChoice(category: Category, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val accent = categoryColor(category.name)
     Surface(
-        modifier = modifier
-            .defaultMinSize(minHeight = 52.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) accent else accent.copy(alpha = 0.13f),
-        contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.defaultMinSize(minHeight = 48.dp).clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.small,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             1.dp,
-            if (selected) accent else accent.copy(alpha = 0.45f)
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
         )
     ) {
-        Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-            Text(category.name, textAlign = TextAlign.Center, maxLines = 2)
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(8.dp).background(accent, CircleShape))
+            Spacer(Modifier.width(7.dp))
+            Text(category.name, style = MaterialTheme.typography.bodySmall, maxLines = 2)
         }
     }
 }
@@ -628,8 +718,8 @@ private fun HistoryScreen(
         }
     }
 
+    val normalizedQuery = query.trim().lowercase(Locale.getDefault())
     val filtered = state.expenses.filter { expense ->
-        val normalizedQuery = query.trim().lowercase(Locale.getDefault())
         val matchesQuery = normalizedQuery.isEmpty() ||
             expense.note.lowercase(Locale.getDefault()).contains(normalizedQuery) ||
             expense.categoryName.lowercase(Locale.getDefault()).contains(normalizedQuery)
@@ -640,77 +730,47 @@ private fun HistoryScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 12.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 16.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search note or category") },
-                singleLine = true
+                label = { Text("Search transactions") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
             )
         }
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CategoryFilter(
-                    categories = state.categories,
-                    selectedId = selectedCategoryId,
-                    onSelect = { selectedCategoryId = it },
-                    modifier = Modifier.weight(1f)
-                )
-                MonthFilter(
-                    months = months,
-                    selected = selectedMonth,
-                    onSelect = { selectedMonth = it },
-                    modifier = Modifier.weight(1f)
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CategoryFilter(state.categories, selectedCategoryId, { selectedCategoryId = it }, Modifier.weight(1f))
+                MonthFilter(months, selectedMonth, { selectedMonth = it }, Modifier.weight(1f))
             }
         }
         item {
             Text(
-                "${filtered.size} expense${if (filtered.size == 1) "" else "s"}",
+                "${filtered.size} transaction${if (filtered.size == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         if (filtered.isEmpty()) {
-            item { EmptyMessage("No expenses match these filters.") }
+            item { EmptyState("No transactions found", "Try changing the search or filters.") }
         } else {
             items(filtered, key = { it.id }) { expense ->
-                ExpenseRow(expense = expense, onClick = { onEdit(expense.id) }) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { onEdit(expense.id) }) { Text("Edit") }
-                        TextButton(onClick = { deleteTarget = expense }) { Text("Delete") }
-                    }
-                }
+                TransactionRow(expense, { onEdit(expense.id) }, { deleteTarget = expense })
             }
         }
     }
 
     deleteTarget?.let { expense ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("Delete expense?") },
-            text = { Text("${formatMoney(expense.amountMinor)} • ${expense.categoryName}") },
-            confirmButton = {
-                Button(onClick = {
-                    onDelete(expense.id)
-                    deleteTarget = null
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
-            }
-        )
+        DeleteExpenseDialog(expense, { deleteTarget = null }) {
+            onDelete(expense.id)
+            deleteTarget = null
+        }
     }
 }
 
@@ -719,24 +779,22 @@ private fun CategoryFilter(
     categories: List<Category>,
     selectedId: Long?,
     onSelect: (Long?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
     val label = categories.firstOrNull { it.id == selectedId }?.name ?: "All categories"
     Box(modifier) {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        FilterButton(label) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("All categories") },
-                onClick = { onSelect(null); expanded = false }
-            )
+            DropdownMenuItem(text = { Text("All categories") }, onClick = {
+                onSelect(null)
+                expanded = false
+            })
             categories.forEach { category ->
-                DropdownMenuItem(
-                    text = { Text(category.name) },
-                    onClick = { onSelect(category.id); expanded = false }
-                )
+                DropdownMenuItem(text = { Text(category.name) }, onClick = {
+                    onSelect(category.id)
+                    expanded = false
+                })
             }
         }
     }
@@ -747,93 +805,162 @@ private fun MonthFilter(
     months: List<YearMonth>,
     selected: String,
     onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedMonth = months.firstOrNull { it.toString() == selected }
+    val month = months.firstOrNull { it.toString() == selected }
     Box(modifier) {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(selectedMonth?.format(DateTimeFormatter.ofPattern("MMM yyyy")) ?: "All months")
-        }
+        FilterButton(month?.format(DateTimeFormatter.ofPattern("MMM yyyy")) ?: "All months") { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("All months") },
-                onClick = { onSelect("all"); expanded = false }
-            )
-            months.forEach { month ->
-                DropdownMenuItem(
-                    text = { Text(month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))) },
-                    onClick = { onSelect(month.toString()); expanded = false }
-                )
+            DropdownMenuItem(text = { Text("All months") }, onClick = {
+                onSelect("all")
+                expanded = false
+            })
+            months.forEach { item ->
+                DropdownMenuItem(text = { Text(item.format(DateTimeFormatter.ofPattern("MMMM yyyy"))) }, onClick = {
+                    onSelect(item.toString())
+                    expanded = false
+                })
             }
         }
     }
 }
 
 @Composable
+private fun FilterButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(46.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun DeleteExpenseDialog(expense: Expense, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete expense?") },
+        text = { Text("${expense.note.ifBlank { expense.categoryName }} · ${formatMoney(expense.amountMinor)}") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text("Delete") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
 private fun StatisticsScreen(state: ExpenseUiState, contentPadding: PaddingValues) {
+    val finance = LocalFinanceColors.current
     val today = LocalDate.now()
     val currentMonth = YearMonth.from(today)
     val monthExpenses = state.expenses.filter { YearMonth.from(it.date) == currentMonth }
     val yearExpenses = state.expenses.filter { it.date.year == today.year }
     val monthTotal = monthExpenses.sumOf { it.amountMinor }
     val yearTotal = yearExpenses.sumOf { it.amountMinor }
-    val categoryTotals = monthExpenses
-        .groupBy { it.categoryName }
+    val categoryTotals = monthExpenses.groupBy { it.categoryName }
         .mapValues { (_, expenses) -> expenses.sumOf { it.amountMinor } }
         .toList()
         .sortedByDescending { it.second }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 16.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SummaryCard("This month", formatMoney(monthTotal), Modifier.weight(1f))
-                SummaryCard("This year", formatMoney(yearTotal), Modifier.weight(1f))
+                StatCard("This month", monthTotal, finance.expense, Modifier.weight(1f))
+                StatCard("This year", yearTotal, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
             }
         }
-        item {
-            Text(
-                "Spending by category this month",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+        if (categoryTotals.isNotEmpty()) {
+            item { HighestCategoryCard(categoryTotals.first()) }
         }
+        item { SectionHeader("Spending by category") }
         if (categoryTotals.isEmpty()) {
-            item { EmptyMessage("Add expenses to see your spending breakdown.") }
+            item { EmptyState("No statistics yet", "Add expenses to see your monthly breakdown.") }
         } else {
             items(categoryTotals, key = { it.first }) { (category, amount) ->
-                val fraction = if (monthTotal == 0L) 0f else amount.toFloat() / monthTotal.toFloat()
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(category, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Text(formatMoney(amount))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = fraction.coerceIn(0f, 1f),
-                            modifier = Modifier.fillMaxWidth(),
-                            color = categoryColor(category),
-                            trackColor = categoryColor(category).copy(alpha = 0.18f)
-                        )
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            "${(fraction * 100).toInt()}% of this month’s spending",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                CategoryStatRow(category, amount, monthTotal)
             }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(label: String, amount: Long, accent: Color, modifier: Modifier) {
+    Surface(
+        modifier = modifier.heightIn(min = 88.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                formatMoney(amount),
+                style = MaterialTheme.typography.titleLarge,
+                color = accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun HighestCategoryCard(highest: Pair<String, Long>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            CategoryAvatar(highest.first)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Highest spending category", style = MaterialTheme.typography.bodySmall)
+                Text(highest.first, style = MaterialTheme.typography.titleSmall)
+            }
+            Text(formatMoney(highest.second), fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun CategoryStatRow(category: String, amount: Long, total: Long) {
+    val accent = categoryColor(category)
+    val fraction = if (total <= 0L) 0f else amount.toFloat() / total.toFloat()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(9.dp).background(accent, CircleShape))
+                Spacer(Modifier.width(8.dp))
+                Text(category, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(formatMoney(amount), fontWeight = FontWeight.SemiBold)
+            }
+            LinearProgressIndicator(
+                progress = fraction.coerceIn(0f, 1f),
+                modifier = Modifier.fillMaxWidth(),
+                color = accent,
+                trackColor = accent.copy(alpha = 0.14f)
+            )
+            Text(
+                "${(fraction * 100).toInt()}% of this month’s expenses",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -853,102 +980,105 @@ private fun BudgetScreen(
     var savingsText by rememberSaveable(state.settings.savingsGoalMinor) {
         mutableStateOf(amountForInput(state.settings.savingsGoalMinor))
     }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
-    val month = YearMonth.now()
-    val spent = state.expenses.filter { YearMonth.from(it.date) == month }.sumOf { it.amountMinor }
-    val income = parseOptionalAmount(incomeText)
-    val budget = parseOptionalAmount(budgetText)
-    val goal = parseOptionalAmount(savingsText)
-    val remaining = income - spent
-    val savingsProgress = if (goal <= 0) 0f else max(remaining, 0L).toFloat() / goal.toFloat()
-    val budgetProgress = if (budget <= 0) 0f else spent.toFloat() / budget.toFloat()
+    val spent = state.expenses.filter { YearMonth.from(it.date) == YearMonth.now() }.sumOf { it.amountMinor }
+    val parsedIncome = parseAmountAllowZero(incomeText)
+    val parsedBudget = parseAmountAllowZero(budgetText)
+    val parsedGoal = parseAmountAllowZero(savingsText)
+    val valid = parsedIncome != null && parsedBudget != null && parsedGoal != null
+    val draft = if (valid) MonthlySettings(parsedIncome!!, parsedBudget!!, parsedGoal!!) else null
+    val hasChanges = draft != null && draft != state.settings
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 20.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            BudgetOverview(income, spent, remaining, goal, savingsProgress, budget, budgetProgress)
+        item { BudgetOverview(parsedIncome ?: 0L, spent, parsedBudget ?: 0L, parsedGoal ?: 0L) }
+        item { SectionHeader("Monthly plan details") }
+        item { MoneyField("Monthly income", incomeText) { incomeText = sanitizeMoneyInput(it) } }
+        item { MoneyField("Spending budget", budgetText) { budgetText = sanitizeMoneyInput(it) } }
+        item { MoneyField("Savings goal", savingsText) { savingsText = sanitizeMoneyInput(it) } }
+        if (!valid) {
+            item {
+                Text(
+                    "Enter valid amounts, or leave a field blank for zero.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
-        item {
-            Text(
-                "Monthly plan",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        item { MoneyField("Monthly income", incomeText) { incomeText = it; error = null } }
-        item { MoneyField("Monthly spending budget", budgetText) { budgetText = it; error = null } }
-        item { MoneyField("Monthly savings goal", savingsText) { savingsText = it; error = null } }
-        error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
         item {
             Button(
-                onClick = {
-                    val parsedIncome = parseAmountAllowZero(incomeText)
-                    val parsedBudget = parseAmountAllowZero(budgetText)
-                    val parsedGoal = parseAmountAllowZero(savingsText)
-                    if (parsedIncome == null || parsedBudget == null || parsedGoal == null) {
-                        error = "Enter valid amounts, or leave a field blank for zero."
-                    } else {
-                        onSave(MonthlySettings(parsedIncome, parsedBudget, parsedGoal))
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) { Text("Save Monthly Plan") }
+                onClick = { draft?.let(onSave) },
+                enabled = valid && hasChanges,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) { Text("Save monthly plan") }
+        }
+        if (valid && !hasChanges) {
+            item {
+                Text(
+                    "Monthly plan saved locally",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalFinanceColors.current.income,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun BudgetOverview(
-    income: Long,
-    spent: Long,
-    remaining: Long,
-    goal: Long,
-    savingsProgress: Float,
-    budget: Long,
-    budgetProgress: Float
-) {
-    ElevatedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            OverviewLine("Income", formatMoney(income))
-            OverviewLine("Spent", formatMoney(spent))
-            OverviewLine("Remaining", formatMoney(remaining))
-            OverviewLine("Savings goal", formatMoney(goal))
-            if (goal > 0) {
-                Spacer(Modifier.height(3.dp))
-                Text("Savings goal progress", style = MaterialTheme.typography.bodySmall)
+private fun BudgetOverview(income: Long, spent: Long, budget: Long, savingsGoal: Long) {
+    val finance = LocalFinanceColors.current
+    val remaining = income - spent
+    val budgetRatio = if (budget <= 0L) 0f else spent.toFloat() / budget.toFloat()
+    val savingsProgress = if (savingsGoal <= 0L) 0f else max(remaining, 0L).toFloat() / savingsGoal.toFloat()
+    val tone = budgetTone(budgetRatio)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 1.dp
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OverviewLine("Income", formatMoney(income), finance.income)
+            OverviewLine("Spent", formatMoney(spent), finance.expense)
+            OverviewLine(
+                "Remaining",
+                formatMoney(remaining),
+                if (remaining >= 0L) MaterialTheme.colorScheme.onSurface else finance.expense
+            )
+            OverviewLine("Savings goal", formatMoney(savingsGoal), MaterialTheme.colorScheme.primary)
+            if (budget > 0L) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row {
+                    Text("Budget used", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text("${(budgetRatio * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = tone)
+                }
+                LinearProgressIndicator(
+                    progress = budgetRatio.coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    color = tone,
+                    trackColor = tone.copy(alpha = 0.15f)
+                )
+            }
+            if (savingsGoal > 0L) {
+                Row {
+                    Text("Savings progress", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text(
+                        "${(savingsProgress * 100).toInt().coerceAtLeast(0)}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = finance.income
+                    )
+                }
                 LinearProgressIndicator(
                     progress = savingsProgress.coerceIn(0f, 1f),
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF2E7D32),
-                    trackColor = Color(0xFF2E7D32).copy(alpha = 0.18f)
-                )
-                Text(
-                    "${(savingsProgress * 100).toInt().coerceAtLeast(0)}%",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (budget > 0) {
-                Spacer(Modifier.height(3.dp))
-                Text("Budget used", style = MaterialTheme.typography.bodySmall)
-                LinearProgressIndicator(
-                    progress = budgetProgress.coerceIn(0f, 1f),
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFFF57C00),
-                    trackColor = Color(0xFFF57C00).copy(alpha = 0.18f)
-                )
-                Text(
-                    "${formatMoney(spent)} of ${formatMoney(budget)}",
-                    style = MaterialTheme.typography.bodySmall
+                    color = finance.income,
+                    trackColor = finance.income.copy(alpha = 0.15f)
                 )
             }
         }
@@ -956,10 +1086,10 @@ private fun BudgetOverview(
 }
 
 @Composable
-private fun OverviewLine(label: String, value: String) {
-    Row(Modifier.fillMaxWidth()) {
+private fun OverviewLine(label: String, value: String, valueColor: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.SemiBold)
+        Text(value, fontWeight = FontWeight.SemiBold, color = valueColor, maxLines = 1)
     }
 }
 
@@ -967,13 +1097,13 @@ private fun OverviewLine(label: String, value: String) {
 private fun MoneyField(label: String, value: String, onValueChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
-        onValueChange = { input ->
-            onValueChange(input.filter { it.isDigit() || it == '.' })
-        },
+        onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
-        label = { Text("$label (₹)") },
+        label = { Text(label) },
+        prefix = { Text("₹ ") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true
+        singleLine = true,
+        shape = MaterialTheme.shapes.medium
     )
 }
 
@@ -991,51 +1121,65 @@ private fun CategoriesScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            end = 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 20.dp
-        ),
+        contentPadding = screenPadding(contentPadding),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Button(
+            OutlinedButton(
                 onClick = { showAdd = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) { Text("+  Add Custom Category") }
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(7.dp))
+                Text("Add custom category")
+            }
+        }
+        item {
+            Text(
+                "Tap a category to rename it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         items(categories, key = { it.id }) { category ->
-            Card(Modifier.fillMaxWidth()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable { editing = category },
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
                 Row(
-                    modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                    modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    CategoryAvatar(category.name)
+                    Spacer(Modifier.width(10.dp))
                     Text(category.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                    TextButton(onClick = { editing = category }) { Text("Rename") }
-                    TextButton(onClick = { deleteTarget = category }) { Text("Delete") }
+                    IconButton(onClick = { deleteTarget = category }, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete ${category.name}",
+                            modifier = Modifier.size(19.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
     }
 
     if (showAdd) {
-        CategoryNameDialog(
-            title = "Add category",
-            initialName = "",
-            onDismiss = { showAdd = false },
-            onConfirm = { name -> onAdd(name); showAdd = false }
-        )
+        CategoryNameDialog("Add category", "", { showAdd = false }) { name ->
+            onAdd(name)
+            showAdd = false
+        }
     }
     editing?.let { category ->
-        CategoryNameDialog(
-            title = "Rename category",
-            initialName = category.name,
-            onDismiss = { editing = null },
-            onConfirm = { name -> onRename(category.id, name); editing = null }
-        )
+        CategoryNameDialog("Rename category", category.name, { editing = null }) { name ->
+            onRename(category.id, name)
+            editing = null
+        }
     }
     deleteTarget?.let { category ->
         AlertDialog(
@@ -1043,11 +1187,15 @@ private fun CategoriesScreen(
             title = { Text("Delete ${category.name}?") },
             text = { Text("Existing expenses will be moved to another available category.") },
             confirmButton = {
-                Button(onClick = { onDelete(category.id); deleteTarget = null }) { Text("Delete") }
+                Button(
+                    onClick = {
+                        onDelete(category.id)
+                        deleteTarget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
             },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
-            }
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
         )
     }
 }
@@ -1067,11 +1215,17 @@ private fun CategoryNameDialog(
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { if (it.length <= 40) { name = it; error = false } },
+                onValueChange = {
+                    if (it.length <= 40) {
+                        name = it
+                        error = false
+                    }
+                },
                 label = { Text("Category name") },
                 singleLine = true,
                 isError = error,
-                supportingText = { if (error) Text("Enter a category name.") }
+                supportingText = { if (error) Text("Enter a category name.") },
+                shape = MaterialTheme.shapes.medium
             )
         },
         confirmButton = {
@@ -1084,16 +1238,49 @@ private fun CategoryNameDialog(
 }
 
 @Composable
-private fun EmptyMessage(text: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-            .padding(22.dp),
-        contentAlignment = Alignment.Center
+private fun EmptyState(title: String, message: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Text(text, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
     }
+}
+
+@Composable
+private fun budgetTone(ratio: Float): Color {
+    val finance = LocalFinanceColors.current
+    return when {
+        ratio > 1f -> finance.expense
+        ratio >= 0.75f -> finance.warning
+        else -> finance.income
+    }
+}
+
+private fun screenPadding(contentPadding: PaddingValues) = PaddingValues(
+    start = 16.dp,
+    top = contentPadding.calculateTopPadding() + 8.dp,
+    end = 16.dp,
+    bottom = contentPadding.calculateBottomPadding() + 16.dp
+)
+
+private fun categoryMonogram(categoryName: String): String {
+    val words = categoryName.trim().split(Regex("\\s+|&")).filter { it.isNotBlank() }
+    return words.take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("").ifBlank { "•" }
 }
 
 private fun formatMoney(amountMinor: Long): String {
@@ -1108,18 +1295,26 @@ private fun formatMoney(amountMinor: Long): String {
 private fun formatDate(date: LocalDate): String =
     date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Locale("en", "IN")))
 
+private fun formatRelativeDate(date: LocalDate): String = when (date) {
+    LocalDate.now() -> "Today"
+    LocalDate.now().minusDays(1) -> "Yesterday"
+    else -> formatDate(date)
+}
+
 private fun amountForInput(amountMinor: Long): String = when (amountMinor) {
     0L -> ""
     else -> BigDecimal.valueOf(amountMinor, 2).stripTrailingZeros().toPlainString()
 }
 
-private fun parseAmount(value: String): Long? = runCatching {
-    BigDecimal(value.trim())
-        .setScale(2, RoundingMode.HALF_UP)
-        .movePointRight(2)
-        .longValueExact()
-        .takeIf { it > 0L }
-}.getOrNull()
+private fun sanitizeMoneyInput(value: String): String {
+    val filtered = value.filter { it.isDigit() || it == '.' }
+    val firstDot = filtered.indexOf('.')
+    return if (firstDot < 0) filtered else {
+        filtered.substring(0, firstDot + 1) + filtered.substring(firstDot + 1).replace(".", "")
+    }
+}
+
+private fun parseAmount(value: String): Long? = parseAmountAllowZero(value)?.takeIf { it > 0L }
 
 private fun parseAmountAllowZero(value: String): Long? {
     if (value.isBlank()) return 0L
@@ -1130,22 +1325,4 @@ private fun parseAmountAllowZero(value: String): Long? {
             .longValueExact()
             .takeIf { it >= 0L }
     }.getOrNull()
-}
-
-private fun parseOptionalAmount(value: String): Long = parseAmountAllowZero(value) ?: 0L
-
-private val CategoryColors = listOf(
-    Color(0xFF1565C0),
-    Color(0xFFEF6C00),
-    Color(0xFF2E7D32),
-    Color(0xFF7B1FA2),
-    Color(0xFFC62828),
-    Color(0xFF00838F),
-    Color(0xFF5D4037),
-    Color(0xFF455A64)
-)
-
-private fun categoryColor(categoryName: String): Color {
-    val index = (categoryName.hashCode() and Int.MAX_VALUE) % CategoryColors.size
-    return CategoryColors[index]
 }

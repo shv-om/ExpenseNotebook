@@ -16,7 +16,8 @@ ExpenseNotebook/
 │       │   ├── MainActivity.kt
 │       │   ├── ExpenseViewModel.kt
 │       │   ├── data/ExpenseData.kt
-│       │   └── ui/ExpenseNotebookApp.kt
+│       │   ├── ui/ExpenseNotebookApp.kt
+│       │   └── ui/theme/ExpenseNotebookTheme.kt
 │       └── res/
 │           ├── drawable/ic_launcher_foreground.xml
 │           ├── mipmap-anydpi-v26/ic_launcher.xml

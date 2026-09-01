@@ -243,15 +243,16 @@ class ExpenseDatabase(context: Context) :
     }
 
     fun saveSettings(settings: MonthlySettings) {
-        writableDatabase.update(
+        writableDatabase.insertWithOnConflict(
             "monthly_settings",
+            null,
             ContentValues().apply {
+                put("id", 1)
                 put("income_minor", settings.incomeMinor)
                 put("budget_minor", settings.budgetMinor)
                 put("savings_goal_minor", settings.savingsGoalMinor)
             },
-            "id = 1",
-            null
+            SQLiteDatabase.CONFLICT_REPLACE
         )
     }
 
