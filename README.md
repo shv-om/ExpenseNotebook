@@ -34,35 +34,6 @@ ExpenseNotebook/
 ├── gradlew.bat
 └── .gitignore
 ```
-
-## Open and build
-
-1. Open Android Studio.
-2. Select **Open** and choose the `ExpenseNotebook` folder.
-3. Allow Gradle sync to finish and install Android SDK 35 if prompted.
-4. Select **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
-
-Terminal command:
-
-```bash
-./gradlew assembleDebug
-```
-
-Windows PowerShell or Command Prompt:
-
-```bat
-gradlew.bat assembleDebug
-```
-
-Generated APK:
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-## Build on GitHub without Android Studio
-
-1. Create a GitHub repository and upload the contents of this `ExpenseNotebook` folder.
 2. Open the repository's **Actions** tab.
 3. Select **Build Android APK**.
 4. Select **Run workflow** and wait for the build to finish.
