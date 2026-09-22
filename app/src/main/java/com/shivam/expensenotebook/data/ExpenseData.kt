@@ -36,6 +36,9 @@ data class MonthlySettings(
 
 data class ImportCandidate(
     val importKey: String,
+    val groupKey: String,
+    val groupLabel: String,
+    val isLikelyOwnTransfer: Boolean,
     val amountMinor: Long,
     val dateEpochDay: Long,
     val note: String,
@@ -46,7 +49,7 @@ data class ImportCandidate(
 data class ImportPreview(
     val sourceName: String,
     val transactions: List<ImportCandidate>,
-    val excludedOwnTransfers: Int,
+    val likelyOwnTransfers: Int,
     val skippedCredits: Int,
     val unparsedRows: Int
 )

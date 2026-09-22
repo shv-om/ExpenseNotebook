@@ -119,7 +119,7 @@ object TransactionImportParser {
                 return@forEach
             }
             val description = line.substring(dateMatch.range.last + 1).trim()
-            val receiver = receiverColumnStart?.let { start ->
+            val receiverFromColumn = receiverColumnStart?.let { start ->
                 val end = listOfNotNull(debitColumnStart, creditColumnStart)
                     .filter { it > start }
                     .minOrNull()
@@ -128,8 +128,11 @@ object TransactionImportParser {
                     start.coerceAtMost(trimmedLine.length),
                     end.coerceAtMost(trimmedLine.length)
                 ).trim()
-            }.orEmpty().ifBlank {
-                if (receiverColumnStart != null) extractReceiverAddressValue(description) else ""
+            }.orEmpty()
+            val receiver = if (receiverFromColumn.isNotBlank()) {
+                inferCounterparty(receiverFromColumn, allowPlainName = true)
+            } else {
+                inferCounterparty(description, allowPlainName = false)
             }
             rows += ParsedRow(date, amount, description, receiver, null)
         }
@@ -219,8 +222,7 @@ object TransactionImportParser {
             }
 
             val description = cell(row, columns.description).orEmpty().trim()
-            val explicitReceiver = cell(row, columns.receiver).orEmpty().trim()
-            val receiver = explicitReceiver
+            val receiver = inferReceiverFromRow(row, columns)
             val sourceCategory = cell(row, columns.category).orEmpty().trim()
             val category = knownCategories.firstOrNull { it.equals(sourceCategory, ignoreCase = true) }
                 ?: categorize("$sourceCategory $receiver $description")
@@ -237,24 +239,35 @@ object TransactionImportParser {
         unparsed: Int
     ): ImportPreview {
         val identifiers = ownIdentifiers.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
-        var excluded = 0
-        val candidates = rows.mapNotNull { row ->
-            if (matchesOwnAccount(row.receiver, identifiers)) {
-                excluded++
-                null
-            } else {
-                val category = row.category ?: categorize("${row.receiver} ${row.description}")
-                ImportCandidate(
-                    importKey = hashOf(row.date.toEpochDay(), row.amountMinor, row.description, row.receiver),
-                    amountMinor = row.amountMinor,
-                    dateEpochDay = row.date.toEpochDay(),
-                    note = row.description.take(120),
-                    receiver = row.receiver.take(80),
-                    categoryName = category
-                )
-            }
+        val candidates = rows.map { row ->
+            val identity = row.receiver.ifBlank { inferCounterparty(row.description, allowPlainName = false) }
+            val (groupKey, groupLabel) = groupIdentity(identity, row.description)
+            val ownTransfer = matchesOwnAccount(identity, identifiers)
+            val category = row.category ?: categorize("$identity ${row.description}")
+            ImportCandidate(
+                importKey = hashOf(row.date.toEpochDay(), row.amountMinor, row.description, identity),
+                groupKey = groupKey,
+                groupLabel = groupLabel,
+                isLikelyOwnTransfer = ownTransfer,
+                amountMinor = row.amountMinor,
+                dateEpochDay = row.date.toEpochDay(),
+                note = row.description.take(120),
+                receiver = identity.take(80),
+                categoryName = category
+            )
         }.distinctBy { it.importKey }
-        return ImportPreview(sourceName, candidates, excluded, credits, unparsed)
+        val groupedCandidates = candidates.groupBy(ImportCandidate::groupKey).values.flatMap { group ->
+            val groupCategory = group.groupingBy(ImportCandidate::categoryName).eachCount()
+                .maxByOrNull { it.value }?.key ?: "Other"
+            group.map { it.copy(categoryName = groupCategory) }
+        }.sortedWith(compareByDescending<ImportCandidate> { it.dateEpochDay }.thenBy { it.groupLabel })
+        return ImportPreview(
+            sourceName,
+            groupedCandidates,
+            groupedCandidates.count(ImportCandidate::isLikelyOwnTransfer),
+            credits,
+            unparsed
+        )
     }
 
     private fun matchesOwnAccount(receiver: String, identifiers: List<String>): Boolean {
@@ -300,9 +313,71 @@ object TransactionImportParser {
         }
     }
 
-    private fun extractReceiverAddressValue(value: String): String {
-        UPI_ID.find(value)?.value?.let { return it }
-        return NAME_SLASH_NAME.find(value)?.value.orEmpty()
+    private fun inferReceiverFromRow(row: List<String>, columns: Columns): String {
+        cell(row, columns.receiver)?.trim()?.takeIf(String::isNotBlank)?.let {
+            return inferCounterparty(it, allowPlainName = true)
+        }
+
+        val excluded = setOfNotNull(
+            columns.date, columns.description, columns.debit, columns.credit, columns.amount,
+            columns.type, columns.category, columns.balance, columns.reference,
+            columns.sourceName, columns.sourceAccount
+        )
+        val candidates = row.withIndex()
+            .filter { (index, value) -> index !in excluded && value.isNotBlank() }
+            .map { it.value.trim() }
+
+        candidates.firstNotNullOfOrNull { value ->
+            inferCounterparty(value, allowPlainName = false).takeIf(String::isNotBlank)
+        }?.let { return it }
+
+        candidates.firstOrNull(::looksLikePlainName)?.let { return it.take(80) }
+        return cell(row, columns.description)
+            ?.let { inferCounterparty(it, allowPlainName = false) }
+            .orEmpty()
+    }
+
+    private fun inferCounterparty(value: String, allowPlainName: Boolean): String {
+        val cleaned = value.replace(Regex("\\s+"), " ").trim()
+        if (cleaned.isBlank()) return ""
+        UPI_ID.find(cleaned)?.value?.let { return it }
+        MASKED_ID.find(cleaned)?.value?.let { return it }
+        NAME_SLASH_NAME.find(cleaned)?.value?.trim()?.takeIf { candidate ->
+            candidate.split('/').none { it.trim().lowercase(Locale.ROOT) in IGNORED_COUNTERPARTY_TOKENS }
+        }?.let { return it }
+        NAMED_COUNTERPARTY.find(cleaned)?.groups?.get(1)?.value?.trim()?.let { return it }
+
+        cleaned.split('/', '|', ':')
+            .map(String::trim)
+            .firstOrNull { token ->
+                val simple = token.lowercase(Locale.ROOT)
+                token.length in 3..60 && token.any(Char::isLetter) && simple !in IGNORED_COUNTERPARTY_TOKENS &&
+                    token.none(Char::isDigit) && !MONEY_TOKEN.matches(token)
+            }?.let { return it }
+
+        return if (allowPlainName && cleaned.length <= 80) cleaned else ""
+    }
+
+    private fun looksLikePlainName(value: String): Boolean {
+        val cleaned = value.trim()
+        return cleaned.length in 3..60 && cleaned.any(Char::isLetter) &&
+            cleaned.none(Char::isDigit) && cleaned.count(Char::isLetter) >= 3
+    }
+
+    private fun groupIdentity(receiver: String, description: String): Pair<String, String> {
+        if (receiver.isNotBlank()) {
+            return "party:${normalize(receiver)}" to receiver.take(60)
+        }
+        val simplified = description
+            .replace(UPI_ID, " ")
+            .replace(Regex("\\b\\d{4,}\\b"), " ")
+            .replace(MONEY_TOKEN, " ")
+            .replace(Regex("(?i)\\b(?:DR|DEBIT|WITHDRAWAL|PAID|UPI|IMPS|NEFT|RTGS|REF|UTR|TXN)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val key = normalize(simplified).take(80).ifBlank { "unidentified" }
+        val label = simplified.take(60).ifBlank { "Unidentified transactions" }
+        return "description:$key" to label
     }
 
     private fun identifyColumns(row: List<String>): Columns {
@@ -310,7 +385,9 @@ object TransactionImportParser {
             val aliases = names.map(::normalize).toSet()
             return row.indexOfFirst { header ->
                 val normalizedHeader = normalize(header)
-                aliases.any { alias -> normalizedHeader == alias || normalizedHeader.startsWith(alias) }
+                aliases.any { alias ->
+                    normalizedHeader == alias || (alias.length > 2 && normalizedHeader.startsWith(alias))
+                }
             }.takeIf { it >= 0 }
         }
         return Columns(
@@ -319,13 +396,18 @@ object TransactionImportParser {
             receiver = find(
                 "receiver", "receiver name", "receiver address", "receiver upi", "recipient",
                 "recipient address", "payee", "payee address", "beneficiary", "beneficiary address",
-                "upi", "upi id", "upi address", "merchant"
+                "upi", "upi id", "upi address", "merchant", "counterparty", "party name", "vpa",
+                "paid to", "transferred to", "to", "contact", "name", "address"
             ),
             debit = find("debit", "debit amount", "withdrawal", "withdrawal amount", "dr amount"),
             credit = find("credit", "credit amount", "deposit", "deposit amount", "cr amount"),
             amount = find("amount", "transaction amount", "txn amount"),
             type = find("type", "transaction type", "dr cr", "debit credit", "direction"),
-            category = find("category", "expense category")
+            category = find("category", "expense category"),
+            balance = find("balance", "closing balance", "available balance", "running balance"),
+            reference = find("reference", "reference number", "transaction id", "txn id", "utr", "rrn"),
+            sourceName = find("account holder", "account name", "sender", "sender name", "from name"),
+            sourceAccount = find("account number", "source account", "debit account", "from account")
         )
     }
 
@@ -466,7 +548,11 @@ object TransactionImportParser {
         val credit: Int?,
         val amount: Int?,
         val type: Int?,
-        val category: Int?
+        val category: Int?,
+        val balance: Int?,
+        val reference: Int?,
+        val sourceName: Int?,
+        val sourceAccount: Int?
     )
 
     private val DATE_FORMATS = listOf(
@@ -485,5 +571,13 @@ object TransactionImportParser {
     private val DEBIT_AMOUNT = Regex("(?i)(?:DR|DEBIT|WITHDRAWAL|PAID)\\s*[:-]?\\s*(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)")
     private val AMOUNT_DEBIT = Regex("(?i)(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:DR|DEBIT)")
     private val UPI_ID = Regex("[A-Za-z0-9._-]{2,}@[A-Za-z0-9._-]{2,}")
+    private val MASKED_ID = Regex("(?:\\*|[Xx]){2,}[ -]?\\d{4}(?:@[A-Za-z0-9._-]{2,})?")
     private val NAME_SLASH_NAME = Regex("[A-Za-z][A-Za-z .]{1,39}/[A-Za-z][A-Za-z .]{1,39}")
+    private val NAMED_COUNTERPARTY = Regex(
+        "(?i)(?:PAYEE|BENEFICIARY|RECEIVER|RECIPIENT|PAID TO|TRANSFERRED TO)\\s*[:-]?\\s*([A-Z][A-Z .]{2,50})"
+    )
+    private val IGNORED_COUNTERPARTY_TOKENS = setOf(
+        "upi", "imps", "neft", "rtgs", "ach", "ref", "utr", "txn", "payment", "debit",
+        "transfer", "paid", "purchase", "pos", "bank", "mobile", "online", "p2a", "p2m", "p2p"
+    )
 }

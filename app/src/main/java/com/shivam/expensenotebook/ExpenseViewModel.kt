@@ -91,7 +91,9 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
             }.onSuccess { preview ->
                 _importState.value = ImportUiState(
                     preview = preview,
-                    selectedKeys = preview.transactions.mapTo(mutableSetOf(), ImportCandidate::importKey)
+                    selectedKeys = preview.transactions
+                        .filterNot(ImportCandidate::isLikelyOwnTransfer)
+                        .mapTo(mutableSetOf(), ImportCandidate::importKey)
                 )
             }.onFailure { throwable ->
                 _importState.value = ImportUiState(error = throwable.userMessage())
@@ -120,6 +122,30 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
             preview = preview.copy(
                 transactions = preview.transactions.map { transaction ->
                     if (transaction.importKey == importKey) transaction.copy(categoryName = categoryName) else transaction
+                }
+            )
+        )
+    }
+
+    fun setImportGroupSelected(groupKey: String, selected: Boolean) {
+        val current = _importState.value
+        val groupKeys = current.preview?.transactions
+            ?.filter { it.groupKey == groupKey }
+            ?.map(ImportCandidate::importKey)
+            .orEmpty()
+        val selectedKeys = current.selectedKeys.toMutableSet()
+        if (selected) selectedKeys.addAll(groupKeys) else selectedKeys.removeAll(groupKeys.toSet())
+        _importState.value = current.copy(selectedKeys = selectedKeys, message = null)
+    }
+
+    fun setImportGroupCategory(groupKey: String, categoryName: String) {
+        val current = _importState.value
+        val preview = current.preview ?: return
+        _importState.value = current.copy(
+            preview = preview.copy(
+                transactions = preview.transactions.map { transaction ->
+                    if (transaction.groupKey == groupKey) transaction.copy(categoryName = categoryName)
+                    else transaction
                 }
             )
         )
