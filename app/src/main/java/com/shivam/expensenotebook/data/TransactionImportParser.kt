@@ -55,9 +55,23 @@ object TransactionImportParser {
         var unparsed = 0
         var debitColumnStart: Int? = null
         var creditColumnStart: Int? = null
+        var receiverColumnStart: Int? = null
         text.lineSequence().forEach { rawLine ->
             val trimmedLine = rawLine.trim()
             val headerUpper = trimmedLine.uppercase(Locale.ROOT)
+            if (!DATE_AT_START.containsMatchIn(trimmedLine) &&
+                (headerUpper.contains("RECEIVER ADDRESS") || headerUpper.contains("RECEIVER NAME") ||
+                    headerUpper.contains("BENEFICIARY") || headerUpper.contains("PAYEE")) &&
+                (headerUpper.contains("AMOUNT") || headerUpper.contains("DEBIT") ||
+                    headerUpper.contains("WITHDRAWAL"))
+            ) {
+                receiverColumnStart = listOf(
+                    headerUpper.indexOf("RECEIVER ADDRESS"),
+                    headerUpper.indexOf("RECEIVER NAME"),
+                    headerUpper.indexOf("BENEFICIARY"),
+                    headerUpper.indexOf("PAYEE")
+                ).filter { it >= 0 }.minOrNull()
+            }
             if (!DATE_AT_START.containsMatchIn(trimmedLine) &&
                 (headerUpper.contains("DEBIT") || headerUpper.contains("WITHDRAWAL")) &&
                 (headerUpper.contains("CREDIT") || headerUpper.contains("DEPOSIT"))
@@ -105,7 +119,19 @@ object TransactionImportParser {
                 return@forEach
             }
             val description = line.substring(dateMatch.range.last + 1).trim()
-            rows += ParsedRow(date, amount, description, extractReceiver(description), null)
+            val receiver = receiverColumnStart?.let { start ->
+                val end = listOfNotNull(debitColumnStart, creditColumnStart)
+                    .filter { it > start }
+                    .minOrNull()
+                    ?: trimmedLine.length
+                trimmedLine.substring(
+                    start.coerceAtMost(trimmedLine.length),
+                    end.coerceAtMost(trimmedLine.length)
+                ).trim()
+            }.orEmpty().ifBlank {
+                if (receiverColumnStart != null) extractReceiverAddressValue(description) else ""
+            }
+            rows += ParsedRow(date, amount, description, receiver, null)
         }
         return finalizeRows(sourceName, rows, ownIdentifiers, credits, unparsed)
     }
@@ -194,7 +220,7 @@ object TransactionImportParser {
 
             val description = cell(row, columns.description).orEmpty().trim()
             val explicitReceiver = cell(row, columns.receiver).orEmpty().trim()
-            val receiver = explicitReceiver.ifBlank { extractReceiver(description) }
+            val receiver = explicitReceiver
             val sourceCategory = cell(row, columns.category).orEmpty().trim()
             val category = knownCategories.firstOrNull { it.equals(sourceCategory, ignoreCase = true) }
                 ?: categorize("$sourceCategory $receiver $description")
@@ -213,7 +239,7 @@ object TransactionImportParser {
         val identifiers = ownIdentifiers.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
         var excluded = 0
         val candidates = rows.mapNotNull { row ->
-            if (matchesOwnAccount(row.description, row.receiver, identifiers)) {
+            if (matchesOwnAccount(row.receiver, identifiers)) {
                 excluded++
                 null
             } else {
@@ -231,14 +257,20 @@ object TransactionImportParser {
         return ImportPreview(sourceName, candidates, excluded, credits, unparsed)
     }
 
-    private fun matchesOwnAccount(description: String, receiver: String, identifiers: List<String>): Boolean {
-        val text = receiver.ifBlank { description }
-        val normalizedText = normalize(text)
-        val digits = Regex("(?<!\\d)\\d{4}(?!\\d)").findAll(text).map { it.value }.toSet()
+    private fun matchesOwnAccount(receiver: String, identifiers: List<String>): Boolean {
+        if (receiver.isBlank()) return false
+        val normalizedReceiver = normalize(receiver)
+        val receiverDigits = receiver.filter(Char::isDigit)
+        val ignoredNames = setOf("upi", "bank", "account", "receiver", "payee", "beneficiary")
         return identifiers.any { identifier ->
             val trimmed = identifier.trim()
-            if (trimmed.matches(Regex("\\d{4}"))) trimmed in digits
-            else normalize(trimmed).takeIf { it.length >= 3 }?.let(normalizedText::contains) == true
+            val configuredDigits = trimmed.filter(Char::isDigit)
+            val lastFourMatch = configuredDigits.length >= 4 &&
+                receiverDigits.contains(configuredDigits.takeLast(4))
+            val configuredName = trimmed.filter(Char::isLetter).lowercase(Locale.ROOT)
+            val nameMatch = configuredName.length >= 3 && configuredName !in ignoredNames &&
+                normalizedReceiver.contains(configuredName)
+            lastFourMatch || nameMatch
         }
     }
 
@@ -268,27 +300,27 @@ object TransactionImportParser {
         }
     }
 
-    private fun extractReceiver(description: String): String {
-        UPI_ID.find(description)?.value?.let { return it }
-        val ignored = setOf("upi", "imps", "neft", "rtgs", "ref", "txn", "payment", "debit", "transfer", "to")
-        return description.split('/', '|', '-', ':')
-            .map { it.trim() }
-            .firstOrNull { part ->
-                val simple = part.lowercase(Locale.ROOT)
-                part.length in 3..80 && part.any(Char::isLetter) && simple !in ignored &&
-                    !part.matches(Regex("[A-Za-z]*\\d{6,}"))
-            }.orEmpty()
+    private fun extractReceiverAddressValue(value: String): String {
+        UPI_ID.find(value)?.value?.let { return it }
+        return NAME_SLASH_NAME.find(value)?.value.orEmpty()
     }
 
     private fun identifyColumns(row: List<String>): Columns {
         fun find(vararg names: String): Int? {
             val aliases = names.map(::normalize).toSet()
-            return row.indexOfFirst { normalize(it) in aliases }.takeIf { it >= 0 }
+            return row.indexOfFirst { header ->
+                val normalizedHeader = normalize(header)
+                aliases.any { alias -> normalizedHeader == alias || normalizedHeader.startsWith(alias) }
+            }.takeIf { it >= 0 }
         }
         return Columns(
             date = find("date", "transaction date", "txn date", "value date", "posting date"),
             description = find("description", "narration", "details", "remarks", "transaction details", "particulars"),
-            receiver = find("receiver", "receiver name", "payee", "beneficiary", "upi", "upi id", "merchant"),
+            receiver = find(
+                "receiver", "receiver name", "receiver address", "receiver upi", "recipient",
+                "recipient address", "payee", "payee address", "beneficiary", "beneficiary address",
+                "upi", "upi id", "upi address", "merchant"
+            ),
             debit = find("debit", "debit amount", "withdrawal", "withdrawal amount", "dr amount"),
             credit = find("credit", "credit amount", "deposit", "deposit amount", "cr amount"),
             amount = find("amount", "transaction amount", "txn amount"),
@@ -453,4 +485,5 @@ object TransactionImportParser {
     private val DEBIT_AMOUNT = Regex("(?i)(?:DR|DEBIT|WITHDRAWAL|PAID)\\s*[:-]?\\s*(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)")
     private val AMOUNT_DEBIT = Regex("(?i)(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:DR|DEBIT)")
     private val UPI_ID = Regex("[A-Za-z0-9._-]{2,}@[A-Za-z0-9._-]{2,}")
+    private val NAME_SLASH_NAME = Regex("[A-Za-z][A-Za-z .]{1,39}/[A-Za-z][A-Za-z .]{1,39}")
 }

@@ -358,6 +358,13 @@ private fun HomeScreen(
                 )
             }
         }
+        item {
+            Button(
+                onClick = onImport,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) { Text("Import PDF / Excel statement") }
+        }
         item { SectionHeader("Recent transactions", "See all", onHistory) }
         if (state.expenses.isEmpty()) {
             item { EmptyState("No expenses yet", "Use the + button to record your first expense.") }
@@ -371,13 +378,8 @@ private fun HomeScreen(
             item { BudgetPreview(spent, budget, onBudget) }
         }
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) {
-                    Text("Import statement")
-                }
-                TextButton(onClick = onCategories, modifier = Modifier.weight(1f)) {
-                    Text("Manage categories", maxLines = 1)
-                }
+            TextButton(onClick = onCategories, modifier = Modifier.fillMaxWidth()) {
+                Text("Manage categories", maxLines = 1)
             }
         }
     }
@@ -1211,8 +1213,10 @@ private fun ImportScreen(
                 value = identifiers,
                 onValueChange = { identifiers = it.take(300) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("My account names or last 4 digits") },
-                supportingText = { Text("Separate multiple entries with commas. Matching transfers are excluded.") },
+                label = { Text("My name or account last 4 digits") },
+                supportingText = {
+                    Text("Separate entries with commas. Only the Receiver Address column is checked.")
+                },
                 minLines = 2,
                 maxLines = 3,
                 shape = MaterialTheme.shapes.medium

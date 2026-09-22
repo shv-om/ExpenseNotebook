@@ -35,7 +35,6 @@ ExpenseNotebook/
 ├── gradlew.bat
 └── .gitignore
 ```
-<<<<<<< HEAD
 
 ## Open and build
 
@@ -74,6 +73,4 @@ The workflow also builds automatically whenever code is pushed to the `main` bra
 
 ## Statement import
 
-Open **Overview > Import statement**, enter your own account names or last four digits, then choose a text-based PDF or `.xlsx` file. The app detects debit rows, excludes matching own-account transfers, suggests categories, and shows a review list before writing anything to SQLite. Duplicate imports are skipped. Scanned PDFs and legacy `.xls` files are not supported.
-=======
->>>>>>> e3ee0a24f6cf5f3eda4ac0207e0a347c9f3291b0
+Open **Overview > Import PDF / Excel statement**, enter your name and/or account last four digits, then choose a text-based PDF or `.xlsx` file. Exclusion checks only the statement's Receiver Address/Receiver Name column: values such as `****1234@upi` match the configured last four digits, and values such as `Name/Name` match the configured name. The app then suggests categories and shows a review list before writing anything to SQLite. Duplicate imports are skipped. Scanned PDFs and legacy `.xls` files are not supported.
