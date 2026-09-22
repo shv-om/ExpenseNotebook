@@ -120,8 +120,15 @@ object TransactionImportParser {
         } ?: return PdfTransactionResult.Unparsed
 
         val receiverFromColumn = inferCounterparty(receiverCell, allowPlainName = true)
-        val receiver = receiverFromColumn.ifBlank {
-            extractOutgoingReceiver(narration, sender, ownIdentifiers)
+        val receiver = when {
+            receiverFromColumn.isBlank() -> extractOutgoingReceiver(narration, sender, ownIdentifiers)
+            // Some statements only expose a bare "VPA" column with no separate sender/receiver
+            // split (see detectPdfLayout). On a debit row that column is sometimes the payer's
+            // OWN vpa, not the counterparty's. If what we sliced out matches the user's own
+            // identifiers it cannot be the receiver, so fall back to parsing the narration text.
+            matchesOwnAccount(receiverFromColumn, ownIdentifiers) ->
+                extractOutgoingReceiver(narration, sender, ownIdentifiers).ifBlank { receiverFromColumn }
+            else -> receiverFromColumn
         }
         return PdfTransactionResult.Expense(
             ParsedRow(date, amount, narration, receiver, null)
@@ -311,17 +318,25 @@ object TransactionImportParser {
 
     private fun matchesOwnAccount(receiver: String, identifiers: List<String>): Boolean {
         if (receiver.isBlank()) return false
-        val normalizedReceiver = normalize(receiver)
         val receiverDigits = receiver.filter(Char::isDigit)
+        val receiverWords = receiver.replace(Regex("[^A-Za-z ]"), " ")
+            .replace(Regex("\\s+"), " ").trim().lowercase(Locale.ROOT)
         val ignoredNames = setOf("upi", "bank", "account", "receiver", "payee", "beneficiary")
         return identifiers.any { identifier ->
             val trimmed = identifier.trim()
             val configuredDigits = trimmed.filter(Char::isDigit)
-            val lastFourMatch = configuredDigits.length >= 4 &&
-                receiverDigits.contains(configuredDigits.takeLast(4))
-            val configuredName = trimmed.filter(Char::isLetter).lowercase(Locale.ROOT)
-            val nameMatch = configuredName.length >= 3 && configuredName !in ignoredNames &&
-                normalizedReceiver.contains(configuredName)
+            // Match only when the identifier's digits are the trailing (masked-account-style)
+            // suffix of the receiver's digits - NOT anywhere inside it. A plain `.contains`
+            // here was flagging unrelated transactions as "own transfers" whenever a reference
+            // number, date, or amount happened to contain the same 4 digits by coincidence.
+            val lastFourMatch = configuredDigits.length >= 4 && receiverDigits.length >= 4 &&
+                receiverDigits.endsWith(configuredDigits.takeLast(4))
+            val configuredWords = trimmed.replace(Regex("[^A-Za-z ]"), " ")
+                .replace(Regex("\\s+"), " ").trim().lowercase(Locale.ROOT)
+            // Whole-word match on the padded strings, so a short configured name like "raj"
+            // can't match inside an unrelated longer word like "rajesh".
+            val nameMatch = configuredWords.length >= 4 && configuredWords !in ignoredNames &&
+                " $receiverWords ".contains(" $configuredWords ")
             lastFourMatch || nameMatch
         }
     }
