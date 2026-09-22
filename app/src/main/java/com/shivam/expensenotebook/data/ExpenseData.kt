@@ -52,6 +52,7 @@ data class ImportPreview(
     val transactions: List<ImportCandidate>,
     val likelyOwnTransfers: Int,
     val skippedCredits: Int,
+    val skippedFailed: Int,
     val unparsedRows: Int
 )
 

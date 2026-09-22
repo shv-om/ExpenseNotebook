@@ -1204,7 +1204,7 @@ private fun ImportScreen(
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Private, on-device import", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "PDF amounts come only from the dated row's debit/amount column. Sender and receiver are read separately; groups use the receiver ID/name.",
+                        "PDF amounts come from the Amount column, never the payment reference. Only successful debits are included; sender and receiver stay separate.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1288,7 +1288,8 @@ private fun ImportScreen(
                     Text(
                         "${preview.transactions.size} debits in ${groups.size} groups · " +
                             "${preview.likelyOwnTransfers} likely internal transactions unchecked · " +
-                            "${preview.skippedCredits} credits skipped · ${preview.unparsedRows} rows not imported",
+                            "${preview.skippedCredits} credits skipped · ${preview.skippedFailed} failed skipped · " +
+                            "${preview.unparsedRows} rows not imported",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

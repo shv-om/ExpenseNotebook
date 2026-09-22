@@ -54,6 +54,7 @@ object TransactionImportParser {
         val rows = mutableListOf<ParsedRow>()
         val identifiers = ownIdentifiers.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
         var credits = 0
+        var failed = 0
         var unparsed = 0
         var currentLayout: PdfLayout? = null
         var transactionLayout: PdfLayout? = null
@@ -64,6 +65,7 @@ object TransactionImportParser {
             when (val parsed = parsePdfTransaction(transactionLines, transactionLayout, identifiers)) {
                 is PdfTransactionResult.Expense -> rows += parsed.row
                 PdfTransactionResult.Credit -> credits++
+                PdfTransactionResult.Failed -> failed++
                 PdfTransactionResult.Unparsed -> unparsed++
             }
             transactionLines.clear()
@@ -86,7 +88,7 @@ object TransactionImportParser {
             }
         }
         flushTransaction()
-        return finalizeRows(sourceName, rows, ownIdentifiers, credits, unparsed)
+        return finalizeRows(sourceName, rows, ownIdentifiers, credits, failed, unparsed)
     }
 
     private fun parsePdfTransaction(
@@ -94,6 +96,8 @@ object TransactionImportParser {
         layout: PdfLayout?,
         ownIdentifiers: List<String>
     ): PdfTransactionResult {
+        parseUpiHistoryRow(lines.first())?.let { return it }
+
         val combined = lines.joinToString(" ") { it.trim() }.replace(Regex("\\s+"), " ")
         val dateMatch = DATE_AT_START.find(combined) ?: return PdfTransactionResult.Unparsed
         val date = parseDate(dateMatch.value.trim()) ?: return PdfTransactionResult.Unparsed
@@ -110,6 +114,11 @@ object TransactionImportParser {
         val credit = layout?.credit?.let { parseFirstAmountMinor(slicePdfColumn(datedLine, it, layout)) }
         val amountCell = layout?.amount?.let { parseFirstAmountMinor(slicePdfColumn(datedLine, it, layout)) }
         val type = layout?.type?.let { slicePdfColumn(datedLine, it, layout) }.orEmpty().uppercase(Locale.ROOT)
+        val status = layout?.status?.let { slicePdfColumn(datedLine, it, layout) }.orEmpty()
+
+        if (status.isNotBlank() && !SUCCESS_STATUS.containsMatchIn(status)) {
+            return PdfTransactionResult.Failed
+        }
 
         if ((credit ?: 0L) > 0L && (debit ?: 0L) <= 0L) return PdfTransactionResult.Credit
         if (CREDIT_WORD.containsMatchIn(type) && !DEBIT_WORD.containsMatchIn(type)) {
@@ -145,6 +154,39 @@ object TransactionImportParser {
         )
     }
 
+    private fun parseUpiHistoryRow(line: String): PdfTransactionResult? {
+        val match = UPI_HISTORY_ROW.matchEntire(line.trim()) ?: return null
+        val date = parseDate(match.groupValues[1]) ?: return PdfTransactionResult.Unparsed
+        val bankName = match.groupValues[3].trim()
+        val senderCell = match.groupValues[5].trim()
+        val receiverCell = match.groupValues[6].trim()
+        val reference = match.groupValues[7].trim()
+        val payCollect = match.groupValues[8].uppercase(Locale.ROOT)
+        val amount = parseAmountMinor(match.groupValues[9]) ?: return PdfTransactionResult.Unparsed
+        val direction = match.groupValues[10].uppercase(Locale.ROOT)
+        val status = match.groupValues[11].uppercase(Locale.ROOT)
+
+        if (!SUCCESS_STATUS.containsMatchIn(status)) return PdfTransactionResult.Failed
+        if (direction == "CR") return PdfTransactionResult.Credit
+        if (direction != "DR" || amount <= 0L) return PdfTransactionResult.Unparsed
+
+        val sender = inferCounterparty(senderCell, allowPlainName = true)
+        val receiver = inferCounterparty(receiverCell, allowPlainName = true)
+        val description = "$receiverCell • $bankName • $payCollect • Ref $reference"
+        return PdfTransactionResult.Expense(
+            ParsedRow(
+                date = date,
+                amountMinor = amount,
+                description = description,
+                sender = sender,
+                receiver = receiver,
+                senderMatchText = senderCell,
+                receiverMatchText = receiverCell,
+                category = null
+            )
+        )
+    }
+
     private fun detectPdfLayout(line: String): PdfLayout? {
         val upper = line.uppercase(Locale.ROOT)
         if (DATE_AT_START.containsMatchIn(line.trimStart())) return null
@@ -171,13 +213,14 @@ object TransactionImportParser {
         val credit = position("CREDIT AMOUNT", "DEPOSIT AMOUNT", "DEPOSIT", "CR AMOUNT")
             ?: if (!upper.contains("CREDIT ACCOUNT")) position("CREDIT") else null
         val type = position("TRANSACTION TYPE", "DR/CR", "CR/DR", "TYPE")
+        val status = position("TRANSACTION STATUS", "PAYMENT STATUS", "STATUS")
         val balance = position("CLOSING BALANCE", "RUNNING BALANCE", "AVAILABLE BALANCE", "BALANCE")
         val explicitAmount = position("TRANSACTION AMOUNT", "TXN AMOUNT")
         val amount = explicitAmount ?: if (debit == null && credit == null) position("AMOUNT") else null
         val hasMoneyDirection = debit != null || credit != null || amount != null || type != null
         val hasTransactionDetail = description != null || receiver != null
         if (date == null || !hasMoneyDirection || !hasTransactionDetail) return null
-        return PdfLayout(date, description, sender, receiver, debit, credit, amount, type, balance)
+        return PdfLayout(date, description, sender, receiver, debit, credit, amount, type, status, balance)
     }
 
     private fun slicePdfColumn(lines: List<String>, start: Int, layout: PdfLayout): String {
@@ -262,6 +305,7 @@ object TransactionImportParser {
         val identifiers = ownIdentifiers.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
         val rows = mutableListOf<ParsedRow>()
         var credits = 0
+        var failed = 0
         var unparsed = 0
         table.drop(headerIndex + 1).forEach { row ->
             if (row.all(String::isBlank)) return@forEach
@@ -274,6 +318,11 @@ object TransactionImportParser {
             val credit = cell(row, columns.credit)?.let(::parseAmountMinor)?.let { kotlin.math.abs(it) }
             val amountValue = cell(row, columns.amount)?.let(::parseAmountMinor)
             val type = cell(row, columns.type).orEmpty().uppercase(Locale.ROOT)
+            val status = cell(row, columns.status).orEmpty()
+            if (status.isNotBlank() && !SUCCESS_STATUS.containsMatchIn(status)) {
+                failed++
+                return@forEach
+            }
             val outgoing = when {
                 debit != null && debit > 0L -> debit
                 credit != null && credit > 0L -> null
@@ -302,7 +351,7 @@ object TransactionImportParser {
                 category = category
             )
         }
-        return finalizeRows(sourceName, rows, ownIdentifiers, credits, unparsed)
+        return finalizeRows(sourceName, rows, ownIdentifiers, credits, failed, unparsed)
     }
 
     private fun finalizeRows(
@@ -310,6 +359,7 @@ object TransactionImportParser {
         rows: List<ParsedRow>,
         ownIdentifiers: String,
         credits: Int,
+        failed: Int,
         unparsed: Int
     ): ImportPreview {
         val identifiers = ownIdentifiers.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
@@ -342,6 +392,7 @@ object TransactionImportParser {
             groupedCandidates,
             groupedCandidates.count(ImportCandidate::isLikelyOwnTransfer),
             credits,
+            failed,
             unparsed
         )
     }
@@ -564,6 +615,9 @@ object TransactionImportParser {
         val type = findWhere { header ->
             isAny(header, "type", "transaction type", "dr cr", "debit credit", "direction")
         }
+        val status = findWhere { header ->
+            isAny(header, "status", "transaction status", "payment status")
+        }
         val category = findWhere { it == "category" || it.contains("expensecategory") }
         val reference = findWhere { header ->
             header.contains("reference") || header == "transactionid" || header == "txnid" ||
@@ -577,6 +631,7 @@ object TransactionImportParser {
             credit = credit,
             amount = amount,
             type = type,
+            status = status,
             category = category,
             balance = balance,
             reference = reference,
@@ -733,16 +788,18 @@ object TransactionImportParser {
         val credit: Int?,
         val amount: Int?,
         val type: Int?,
+        val status: Int?,
         val balance: Int?
     ) {
         fun starts(): List<Int> = listOfNotNull(
-            date, description, sender, receiver, debit, credit, amount, type, balance
+            date, description, sender, receiver, debit, credit, amount, type, status, balance
         ).distinct().sorted()
     }
 
     private sealed class PdfTransactionResult {
         data class Expense(val row: ParsedRow) : PdfTransactionResult()
         object Credit : PdfTransactionResult()
+        object Failed : PdfTransactionResult()
         object Unparsed : PdfTransactionResult()
     }
 
@@ -754,6 +811,7 @@ object TransactionImportParser {
         val credit: Int?,
         val amount: Int?,
         val type: Int?,
+        val status: Int?,
         val category: Int?,
         val balance: Int?,
         val reference: Int?,
@@ -772,6 +830,18 @@ object TransactionImportParser {
     )
     private val DEBIT_WORD = Regex("(?:^|\\b)(?:DR|DEBIT|WITHDRAWAL|PAID|OUTGOING)(?:\\b|$)")
     private val CREDIT_WORD = Regex("(?:^|\\b)(?:CR|CREDIT|DEPOSIT|RECEIVED|INCOMING)(?:\\b|$)")
+    private val SUCCESS_STATUS = Regex(
+        "(?:^|\\b)(?:SUCCESS|SUCCESSFUL|COMPLETED|COMPLETE|PROCESSED)(?:\\b|$)",
+        RegexOption.IGNORE_CASE
+    )
+    private val UPI_HISTORY_ROW = Regex(
+        "^\\s*(\\d{1,2}/\\d{1,2}/\\d{4})\\s+(\\d{1,2}:\\d{2}:\\d{2})\\s+" +
+            "(.+?)\\s+([Xx*]+\\d{2,})\\s+" +
+            "(\\S+@\\S+?\\([^)]*\\))\\s+(\\S+@\\S+?\\([^)]*\\))\\s+" +
+            "(\\d{10,})\\s+(PAY|COLLECT)\\s+([\\d,]+(?:\\.\\d{1,2})?)\\s+" +
+            "(DR|CR)\\s+([A-Za-z]+(?:\\s+[A-Za-z]+)?)\\s*\$",
+        RegexOption.IGNORE_CASE
+    )
     private val MONEY_TOKEN = Regex("(?:INR|₹)?\\s*[-(]?\\d[\\d,]*(?:\\.\\d{1,2})?[)]?", RegexOption.IGNORE_CASE)
     private val STRICT_MONEY_TOKEN = Regex(
         "(?:(?:INR|₹)\\s*[-(]?\\d[\\d,]*(?:\\.\\d{1,2})?[)]?|" +
