@@ -1,8 +1,11 @@
 package com.shivam.expensenotebook.ui
 
 import android.app.DatePickerDialog
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -46,6 +49,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -81,9 +85,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shivam.expensenotebook.ExpenseUiState
 import com.shivam.expensenotebook.ExpenseViewModel
+import com.shivam.expensenotebook.ImportUiState
 import com.shivam.expensenotebook.data.CURRENCY_CODE
 import com.shivam.expensenotebook.data.Category
 import com.shivam.expensenotebook.data.Expense
+import com.shivam.expensenotebook.data.ImportCandidate
 import com.shivam.expensenotebook.data.MonthlySettings
 import com.shivam.expensenotebook.ui.theme.LocalFinanceColors
 import com.shivam.expensenotebook.ui.theme.categoryColor
@@ -104,10 +110,12 @@ private const val SCREEN_STATS = "statistics"
 private const val SCREEN_BUDGET = "budget"
 private const val SCREEN_CATEGORIES = "categories"
 private const val SCREEN_ADD = "add"
+private const val SCREEN_IMPORT = "import"
 
 @Composable
 fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
     val state by viewModel.state.collectAsState()
+    val importState by viewModel.importState.collectAsState()
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(SCREEN_HOME) }
     var returnScreen by rememberSaveable { mutableStateOf(SCREEN_HOME) }
@@ -149,6 +157,7 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
                     SCREEN_BUDGET -> "Monthly plan"
                     SCREEN_CATEGORIES -> "Categories"
                     SCREEN_ADD -> if (editingExpenseId == null) "Add expense" else "Edit expense"
+                    SCREEN_IMPORT -> "Import transactions"
                     else -> "Expense Notebook"
                 },
                 showBack = screen !in mainScreens,
@@ -186,7 +195,8 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
                     onHistory = { screen = SCREEN_HISTORY },
                     onStatistics = { screen = SCREEN_STATS },
                     onBudget = { screen = SCREEN_BUDGET },
-                    onCategories = { screen = SCREEN_CATEGORIES }
+                    onCategories = { screen = SCREEN_CATEGORIES },
+                    onImport = { screen = SCREEN_IMPORT }
                 )
 
                 SCREEN_HISTORY -> HistoryScreen(
@@ -214,10 +224,23 @@ fun ExpenseNotebookApp(viewModel: ExpenseViewModel) {
                     expense = editingExpenseId?.let { id -> state.expenses.firstOrNull { it.id == id } },
                     categories = state.categories,
                     contentPadding = innerPadding,
-                    onSave = { id, amount, categoryId, date, note ->
-                        viewModel.saveExpense(id, amount, categoryId, date, note)
+                    onSave = { id, amount, categoryId, date, note, receiver ->
+                        viewModel.saveExpense(id, amount, categoryId, date, note, receiver)
                         screen = returnScreen
                     }
+                )
+
+                SCREEN_IMPORT -> ImportScreen(
+                    state = state,
+                    importState = importState,
+                    contentPadding = innerPadding,
+                    onSaveIdentifiers = viewModel::saveOwnAccountIdentifiers,
+                    onReadFile = viewModel::readImportFile,
+                    onSelect = viewModel::setImportSelected,
+                    onSelectAll = viewModel::selectAllImports,
+                    onCategory = viewModel::setImportCategory,
+                    onImport = viewModel::importSelected,
+                    onClear = viewModel::clearImport
                 )
             }
         }
@@ -299,7 +322,8 @@ private fun HomeScreen(
     onHistory: () -> Unit,
     onStatistics: () -> Unit,
     onBudget: () -> Unit,
-    onCategories: () -> Unit
+    onCategories: () -> Unit,
+    onImport: () -> Unit
 ) {
     val month = YearMonth.now()
     val monthExpenses = state.expenses.filter { YearMonth.from(it.date) == month }
@@ -347,8 +371,13 @@ private fun HomeScreen(
             item { BudgetPreview(spent, budget, onBudget) }
         }
         item {
-            TextButton(onClick = onCategories, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                Text("Manage expense categories")
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) {
+                    Text("Import statement")
+                }
+                TextButton(onClick = onCategories, modifier = Modifier.weight(1f)) {
+                    Text("Manage categories", maxLines = 1)
+                }
             }
         }
     }
@@ -474,7 +503,7 @@ private fun TransactionRow(expense: Expense, onClick: () -> Unit, onDelete: (() 
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    expense.note.ifBlank { expense.categoryName },
+                    expense.receiver.ifBlank { expense.note.ifBlank { expense.categoryName } },
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -487,6 +516,15 @@ private fun TransactionRow(expense: Expense, onClick: () -> Unit, onDelete: (() 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (expense.receiver.isNotBlank() && expense.note.isNotBlank()) {
+                    Text(
+                        expense.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Text(
@@ -567,7 +605,7 @@ private fun AddExpenseScreen(
     expense: Expense?,
     categories: List<Category>,
     contentPadding: PaddingValues,
-    onSave: (Long?, Long, Long, Long, String) -> Unit
+    onSave: (Long?, Long, Long, Long, String, String) -> Unit
 ) {
     val context = LocalContext.current
     val finance = LocalFinanceColors.current
@@ -582,6 +620,7 @@ private fun AddExpenseScreen(
         mutableStateOf(expense?.dateEpochDay ?: LocalDate.now().toEpochDay())
     }
     var note by rememberSaveable(expense?.id) { mutableStateOf(expense?.note.orEmpty()) }
+    var receiver by rememberSaveable(expense?.id) { mutableStateOf(expense?.receiver.orEmpty()) }
     var validationError by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedDate = LocalDate.ofEpochDay(dateEpochDay)
 
@@ -650,6 +689,16 @@ private fun AddExpenseScreen(
         }
         item {
             OutlinedTextField(
+                value = receiver,
+                onValueChange = { if (it.length <= 80) receiver = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Receiver name or UPI (optional)") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium
+            )
+        }
+        item {
+            OutlinedTextField(
                 value = note,
                 onValueChange = { if (it.length <= 120) note = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -665,7 +714,7 @@ private fun AddExpenseScreen(
                     when {
                         amount == null -> validationError = "Enter an amount greater than zero."
                         categoryId == null -> validationError = "Select a category."
-                        else -> onSave(expense?.id, amount, categoryId!!, dateEpochDay, note)
+                        else -> onSave(expense?.id, amount, categoryId!!, dateEpochDay, note, receiver)
                     }
                 },
                 enabled = categories.isNotEmpty(),
@@ -722,6 +771,7 @@ private fun HistoryScreen(
     val filtered = state.expenses.filter { expense ->
         val matchesQuery = normalizedQuery.isEmpty() ||
             expense.note.lowercase(Locale.getDefault()).contains(normalizedQuery) ||
+            expense.receiver.lowercase(Locale.getDefault()).contains(normalizedQuery) ||
             expense.categoryName.lowercase(Locale.getDefault()).contains(normalizedQuery)
         val matchesCategory = selectedCategoryId == null || expense.categoryId == selectedCategoryId
         val matchesMonth = selectedMonth == "all" || YearMonth.from(expense.date).toString() == selectedMonth
@@ -843,7 +893,7 @@ private fun DeleteExpenseDialog(expense: Expense, onDismiss: () -> Unit, onConfi
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete expense?") },
-        text = { Text("${expense.note.ifBlank { expense.categoryName }} · ${formatMoney(expense.amountMinor)}") },
+        text = { Text("${expense.receiver.ifBlank { expense.note.ifBlank { expense.categoryName } }} · ${formatMoney(expense.amountMinor)}") },
         confirmButton = {
             Button(
                 onClick = onConfirm,
@@ -985,7 +1035,9 @@ private fun BudgetScreen(
     val parsedBudget = parseAmountAllowZero(budgetText)
     val parsedGoal = parseAmountAllowZero(savingsText)
     val valid = parsedIncome != null && parsedBudget != null && parsedGoal != null
-    val draft = if (valid) MonthlySettings(parsedIncome!!, parsedBudget!!, parsedGoal!!) else null
+    val draft = if (valid) {
+        MonthlySettings(parsedIncome!!, parsedBudget!!, parsedGoal!!, state.settings.ownAccountIdentifiers)
+    } else null
     val hasChanges = draft != null && draft != state.settings
 
     LazyColumn(
@@ -1105,6 +1157,233 @@ private fun MoneyField(label: String, value: String, onValueChange: (String) -> 
         singleLine = true,
         shape = MaterialTheme.shapes.medium
     )
+}
+
+@Composable
+private fun ImportScreen(
+    state: ExpenseUiState,
+    importState: ImportUiState,
+    contentPadding: PaddingValues,
+    onSaveIdentifiers: (String) -> Unit,
+    onReadFile: (Uri, String) -> Unit,
+    onSelect: (String, Boolean) -> Unit,
+    onSelectAll: (Boolean) -> Unit,
+    onCategory: (String, String) -> Unit,
+    onImport: () -> Unit,
+    onClear: () -> Unit
+) {
+    var identifiers by rememberSaveable(state.settings.ownAccountIdentifiers) {
+        mutableStateOf(state.settings.ownAccountIdentifiers)
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            onSaveIdentifiers(identifiers)
+            onReadFile(it, identifiers)
+        }
+    }
+    val preview = importState.preview
+    val selectedCount = importState.selectedKeys.size
+    val allSelected = preview?.transactions?.isNotEmpty() == true && selectedCount == preview.transactions.size
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = screenPadding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Private, on-device import", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Supports text-based PDF and .xlsx statements. Review every detected debit before saving.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        item {
+            OutlinedTextField(
+                value = identifiers,
+                onValueChange = { identifiers = it.take(300) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("My account names or last 4 digits") },
+                supportingText = { Text("Separate multiple entries with commas. Matching transfers are excluded.") },
+                minLines = 2,
+                maxLines = 3,
+                shape = MaterialTheme.shapes.medium
+            )
+        }
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { onSaveIdentifiers(identifiers) },
+                    enabled = identifiers.trim() != state.settings.ownAccountIdentifiers,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) { Text("Save accounts") }
+                Button(
+                    onClick = {
+                        launcher.launch(
+                            arrayOf(
+                                "application/pdf",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        )
+                    },
+                    enabled = !importState.isReading,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) { Text("Choose file") }
+            }
+        }
+        if (importState.isReading) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Reading statement…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        importState.error?.let { error ->
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Text(error, modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+        }
+        importState.message?.let { message ->
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = LocalFinanceColors.current.incomeContainer
+                ) {
+                    Text(message, modifier = Modifier.padding(12.dp), color = LocalFinanceColors.current.income)
+                }
+            }
+        }
+        if (preview != null) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(preview.sourceName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${preview.transactions.size} debits found · ${preview.excludedOwnTransfers} own transfers excluded · " +
+                            "${preview.skippedCredits} credits skipped · ${preview.unparsedRows} rows not imported",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (preview.transactions.isEmpty()) {
+                item { EmptyState("No importable expenses", "Check the file format or your own-account identifiers.") }
+            } else {
+                item {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = allSelected, onCheckedChange = onSelectAll)
+                        Text("Select all", modifier = Modifier.weight(1f))
+                        Text(
+                            "$selectedCount selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(preview.transactions, key = { it.importKey }) { transaction ->
+                    ImportCandidateRow(
+                        transaction = transaction,
+                        categories = state.categories,
+                        selected = transaction.importKey in importState.selectedKeys,
+                        onSelected = { onSelect(transaction.importKey, it) },
+                        onCategory = { onCategory(transaction.importKey, it) }
+                    )
+                }
+                item {
+                    Button(
+                        onClick = onImport,
+                        enabled = selectedCount > 0 && !importState.isReading,
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) { Text("Import $selectedCount selected") }
+                }
+                item {
+                    TextButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) { Text("Clear preview") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportCandidateRow(
+    transaction: ImportCandidate,
+    categories: List<Category>,
+    selected: Boolean,
+    onSelected: (Boolean) -> Unit,
+    onCategory: (String) -> Unit
+) {
+    var categoryMenu by remember { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 2.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = selected, onCheckedChange = onSelected)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    transaction.receiver.ifBlank { transaction.note.ifBlank { "Imported expense" } },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    formatDate(LocalDate.ofEpochDay(transaction.dateEpochDay)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Box {
+                    TextButton(
+                        onClick = { categoryMenu = true },
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) { Text(transaction.categoryName, style = MaterialTheme.typography.bodySmall) }
+                    DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
+                        categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category.name) },
+                                onClick = {
+                                    onCategory(category.name)
+                                    categoryMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "-${formatMoney(transaction.amountMinor)}",
+                fontWeight = FontWeight.SemiBold,
+                color = LocalFinanceColors.current.expense,
+                maxLines = 1
+            )
+        }
+    }
 }
 
 @Composable

@@ -20,7 +20,8 @@ data class Expense(
     val categoryId: Long,
     val categoryName: String,
     val dateEpochDay: Long,
-    val note: String
+    val note: String,
+    val receiver: String
 ) {
     val date: LocalDate
         get() = LocalDate.ofEpochDay(dateEpochDay)
@@ -29,8 +30,28 @@ data class Expense(
 data class MonthlySettings(
     val incomeMinor: Long = 0,
     val budgetMinor: Long = 0,
-    val savingsGoalMinor: Long = 0
+    val savingsGoalMinor: Long = 0,
+    val ownAccountIdentifiers: String = ""
 )
+
+data class ImportCandidate(
+    val importKey: String,
+    val amountMinor: Long,
+    val dateEpochDay: Long,
+    val note: String,
+    val receiver: String,
+    val categoryName: String
+)
+
+data class ImportPreview(
+    val sourceName: String,
+    val transactions: List<ImportCandidate>,
+    val excludedOwnTransfers: Int,
+    val skippedCredits: Int,
+    val unparsedRows: Int
+)
+
+data class ImportSaveResult(val imported: Int, val duplicates: Int)
 
 private val DEFAULT_CATEGORIES = listOf(
     "Random Expense",
@@ -80,19 +101,23 @@ class ExpenseDatabase(context: Context) :
                 category_id INTEGER NOT NULL,
                 date_epoch_day INTEGER NOT NULL,
                 note TEXT NOT NULL DEFAULT '',
+                receiver TEXT NOT NULL DEFAULT '',
+                import_key TEXT,
                 FOREIGN KEY(category_id) REFERENCES categories(id)
             )
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_expenses_date ON expenses(date_epoch_day DESC)")
         db.execSQL("CREATE INDEX idx_expenses_category ON expenses(category_id)")
+        db.execSQL("CREATE UNIQUE INDEX idx_expenses_import_key ON expenses(import_key)")
         db.execSQL(
             """
             CREATE TABLE monthly_settings (
                 id INTEGER PRIMARY KEY CHECK(id = 1),
                 income_minor INTEGER NOT NULL DEFAULT 0,
                 budget_minor INTEGER NOT NULL DEFAULT 0,
-                savings_goal_minor INTEGER NOT NULL DEFAULT 0
+                savings_goal_minor INTEGER NOT NULL DEFAULT 0,
+                own_account_identifiers TEXT NOT NULL DEFAULT ''
             )
             """.trimIndent()
         )
@@ -103,7 +128,14 @@ class ExpenseDatabase(context: Context) :
         db.insertOrThrow("monthly_settings", null, ContentValues().apply { put("id", 1) })
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN receiver TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE expenses ADD COLUMN import_key TEXT")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_import_key ON expenses(import_key)")
+            db.execSQL("ALTER TABLE monthly_settings ADD COLUMN own_account_identifiers TEXT NOT NULL DEFAULT ''")
+        }
+    }
 
     fun getCategories(): List<Category> {
         val result = mutableListOf<Category>()
@@ -127,7 +159,7 @@ class ExpenseDatabase(context: Context) :
         val result = mutableListOf<Expense>()
         readableDatabase.rawQuery(
             """
-            SELECT e.id, e.amount_minor, e.category_id, c.name, e.date_epoch_day, e.note
+            SELECT e.id, e.amount_minor, e.category_id, c.name, e.date_epoch_day, e.note, e.receiver
             FROM expenses e
             JOIN categories c ON c.id = e.category_id
             ORDER BY e.date_epoch_day DESC, e.id DESC
@@ -141,7 +173,8 @@ class ExpenseDatabase(context: Context) :
                     categoryId = cursor.getLong(2),
                     categoryName = cursor.getString(3),
                     dateEpochDay = cursor.getLong(4),
-                    note = cursor.getString(5)
+                    note = cursor.getString(5),
+                    receiver = cursor.getString(6)
                 )
             }
         }
@@ -151,7 +184,7 @@ class ExpenseDatabase(context: Context) :
     fun getSettings(): MonthlySettings {
         readableDatabase.query(
             "monthly_settings",
-            arrayOf("income_minor", "budget_minor", "savings_goal_minor"),
+            arrayOf("income_minor", "budget_minor", "savings_goal_minor", "own_account_identifiers"),
             "id = 1",
             null,
             null,
@@ -159,7 +192,7 @@ class ExpenseDatabase(context: Context) :
             null
         ).use { cursor ->
             return if (cursor.moveToFirst()) {
-                MonthlySettings(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2))
+                MonthlySettings(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2), cursor.getString(3))
             } else {
                 MonthlySettings()
             }
@@ -171,18 +204,56 @@ class ExpenseDatabase(context: Context) :
         amountMinor: Long,
         categoryId: Long,
         dateEpochDay: Long,
-        note: String
+        note: String,
+        receiver: String
     ) {
         val values = ContentValues().apply {
             put("amount_minor", amountMinor)
             put("category_id", categoryId)
             put("date_epoch_day", dateEpochDay)
             put("note", note.trim())
+            put("receiver", receiver.trim())
         }
         if (id == null) {
             writableDatabase.insertOrThrow("expenses", null, values)
         } else {
             writableDatabase.update("expenses", values, "id = ?", arrayOf(id.toString()))
+        }
+    }
+
+    fun saveImportedExpenses(transactions: List<ImportCandidate>): ImportSaveResult {
+        if (transactions.isEmpty()) return ImportSaveResult(0, 0)
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val categories = mutableMapOf<String, Long>()
+            db.query("categories", arrayOf("id", "name"), null, null, null, null, null).use { cursor ->
+                while (cursor.moveToNext()) categories[cursor.getString(1).lowercase()] = cursor.getLong(0)
+            }
+            val fallbackId = categories["other"] ?: categories.values.first()
+            var imported = 0
+            var duplicates = 0
+            transactions.forEach { transaction ->
+                val categoryId = categories[transaction.categoryName.lowercase()] ?: fallbackId
+                val rowId = db.insertWithOnConflict(
+                    "expenses",
+                    null,
+                    ContentValues().apply {
+                        put("amount_minor", transaction.amountMinor)
+                        put("category_id", categoryId)
+                        put("date_epoch_day", transaction.dateEpochDay)
+                        put("note", transaction.note.trim())
+                        put("receiver", transaction.receiver.trim())
+                        put("import_key", transaction.importKey)
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+                if (rowId == -1L) duplicates++ else imported++
+            }
+            db.setTransactionSuccessful()
+            ImportSaveResult(imported, duplicates)
+        } finally {
+            db.endTransaction()
         }
     }
 
@@ -251,6 +322,7 @@ class ExpenseDatabase(context: Context) :
                 put("income_minor", settings.incomeMinor)
                 put("budget_minor", settings.budgetMinor)
                 put("savings_goal_minor", settings.savingsGoalMinor)
+                put("own_account_identifiers", settings.ownAccountIdentifiers.trim())
             },
             SQLiteDatabase.CONFLICT_REPLACE
         )
@@ -258,6 +330,6 @@ class ExpenseDatabase(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "expense_notebook.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
     }
 }

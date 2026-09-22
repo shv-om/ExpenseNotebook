@@ -1,6 +1,6 @@
 # Expense Notebook
 
-A native Android expense tracker built with Kotlin, Jetpack Compose, a ViewModel, and Android SQLite. It is fully offline and requests no permissions.
+A native Android expense tracker built with Kotlin, Jetpack Compose, a ViewModel, and Android SQLite. It is fully offline and requests no permissions. Transaction expenses can be imported from text-based PDF and `.xlsx` statements after an on-device review.
 
 ## Project structure
 
@@ -16,6 +16,7 @@ ExpenseNotebook/
 │       │   ├── MainActivity.kt
 │       │   ├── ExpenseViewModel.kt
 │       │   ├── data/ExpenseData.kt
+│       │   ├── data/TransactionImportParser.kt
 │       │   ├── ui/ExpenseNotebookApp.kt
 │       │   └── ui/theme/ExpenseNotebookTheme.kt
 │       └── res/
@@ -69,3 +70,7 @@ app/build/outputs/apk/debug/app-debug.apk
 5. Open the completed workflow run and download **ExpenseNotebook-debug-apk** from the **Artifacts** section.
 
 The workflow also builds automatically whenever code is pushed to the `main` branch.
+
+## Statement import
+
+Open **Overview > Import statement**, enter your own account names or last four digits, then choose a text-based PDF or `.xlsx` file. The app detects debit rows, excludes matching own-account transfers, suggests categories, and shows a review list before writing anything to SQLite. Duplicate imports are skipped. Scanned PDFs and legacy `.xls` files are not supported.
