@@ -1204,7 +1204,7 @@ private fun ImportScreen(
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Private, on-device import", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "The app infers names and IDs from available fields, then groups similar debits for review.",
+                        "PDF headers and outgoing-payment markers are used to separate sender from receiver. Groups use the receiver ID/name.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1218,7 +1218,7 @@ private fun ImportScreen(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("My names, UPI IDs or account last 4 digits") },
                 supportingText = {
-                    Text("Separate entries with commas. Matching groups start unchecked but remain visible.")
+                    Text("Separate entries with commas. Only receiver matches start unchecked; sender details are ignored.")
                 },
                 minLines = 2,
                 maxLines = 3,
