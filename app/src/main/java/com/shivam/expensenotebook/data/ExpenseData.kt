@@ -42,6 +42,7 @@ data class ImportCandidate(
     val amountMinor: Long,
     val dateEpochDay: Long,
     val note: String,
+    val sender: String,
     val receiver: String,
     val categoryName: String
 )

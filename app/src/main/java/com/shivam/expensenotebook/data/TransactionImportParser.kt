@@ -100,38 +100,48 @@ object TransactionImportParser {
 
         val narration = layout?.description?.let { slicePdfColumn(lines, it, layout) }
             .orEmpty().ifBlank { combined.substring(dateMatch.range.last + 1).trim() }
-        val sender = layout?.sender?.let { slicePdfColumn(lines, it, layout) }.orEmpty()
+        val senderFromColumn = layout?.sender?.let { slicePdfColumn(lines, it, layout) }.orEmpty()
+        val sender = inferCounterparty(senderFromColumn, allowPlainName = true).ifBlank {
+            extractSender(narration)
+        }
         val receiverCell = layout?.receiver?.let { slicePdfColumn(lines, it, layout) }.orEmpty()
-        val debit = layout?.debit?.let { parseFirstAmountMinor(slicePdfColumn(lines, it, layout)) }
-        val credit = layout?.credit?.let { parseFirstAmountMinor(slicePdfColumn(lines, it, layout)) }
-        val amountCell = layout?.amount?.let { parseFirstAmountMinor(slicePdfColumn(lines, it, layout)) }
-        val type = layout?.type?.let { slicePdfColumn(lines, it, layout) }.orEmpty().uppercase(Locale.ROOT)
+        val datedLine = listOf(lines.first())
+        val debit = layout?.debit?.let { parseFirstAmountMinor(slicePdfColumn(datedLine, it, layout)) }
+        val credit = layout?.credit?.let { parseFirstAmountMinor(slicePdfColumn(datedLine, it, layout)) }
+        val amountCell = layout?.amount?.let { parseFirstAmountMinor(slicePdfColumn(datedLine, it, layout)) }
+        val type = layout?.type?.let { slicePdfColumn(datedLine, it, layout) }.orEmpty().uppercase(Locale.ROOT)
 
         if ((credit ?: 0L) > 0L && (debit ?: 0L) <= 0L) return PdfTransactionResult.Credit
         if (CREDIT_WORD.containsMatchIn(type) && !DEBIT_WORD.containsMatchIn(type)) {
             return PdfTransactionResult.Credit
         }
 
-        val amount = when {
-            debit != null && debit > 0L -> debit
-            amountCell != null && amountCell < 0L -> kotlin.math.abs(amountCell)
-            amountCell != null && amountCell > 0L && DEBIT_WORD.containsMatchIn(type) -> amountCell
-            else -> findPdfDebitAmount(combined, dateMatch.range.last + 1)
+        val amount = if (layout != null) {
+            when {
+                debit != null && debit > 0L -> debit
+                amountCell != null && amountCell < 0L -> kotlin.math.abs(amountCell)
+                amountCell != null && amountCell > 0L && DEBIT_WORD.containsMatchIn(type) -> amountCell
+                else -> null
+            }
+        } else {
+            findPdfDebitAmount(combined, dateMatch.range.last + 1)
         } ?: return PdfTransactionResult.Unparsed
 
         val receiverFromColumn = inferCounterparty(receiverCell, allowPlainName = true)
-        val receiver = when {
-            receiverFromColumn.isBlank() -> extractOutgoingReceiver(narration, sender, ownIdentifiers)
-            // Some statements only expose a bare "VPA" column with no separate sender/receiver
-            // split (see detectPdfLayout). On a debit row that column is sometimes the payer's
-            // OWN vpa, not the counterparty's. If what we sliced out matches the user's own
-            // identifiers it cannot be the receiver, so fall back to parsing the narration text.
-            matchesOwnAccount(receiverFromColumn, ownIdentifiers) ->
-                extractOutgoingReceiver(narration, sender, ownIdentifiers).ifBlank { receiverFromColumn }
-            else -> receiverFromColumn
+        val receiver = receiverFromColumn.ifBlank {
+            extractOutgoingReceiver(narration, sender, ownIdentifiers)
         }
         return PdfTransactionResult.Expense(
-            ParsedRow(date, amount, narration, receiver, null)
+            ParsedRow(
+                date = date,
+                amountMinor = amount,
+                description = narration,
+                sender = sender,
+                receiver = receiver,
+                senderMatchText = senderFromColumn.ifBlank { sender },
+                receiverMatchText = receiverCell.ifBlank { receiver },
+                category = null
+            )
         )
     }
 
@@ -143,11 +153,14 @@ object TransactionImportParser {
         val date = position("TRANSACTION DATE", "TXN DATE", "POSTING DATE", "VALUE DATE", "DATE")
         val description = position("NARRATION", "DESCRIPTION", "PARTICULARS", "TRANSACTION DETAILS", "DETAILS", "REMARKS")
         val sender = position(
-            "SENDER VPA", "PAYER VPA", "SENDER", "PAYER", "FROM ACCOUNT", "DEBIT ACCOUNT", "ACCOUNT HOLDER"
+            "SENDER VPA", "PAYER VPA", "FROM VPA", "SENDER ADDRESS", "PAYER ADDRESS",
+            "REMITTER NAME", "REMITTER", "SENDER", "PAYER", "FROM ACCOUNT", "DEBITED FROM",
+            "DEBIT ACCOUNT", "ACCOUNT HOLDER"
         )
         val explicitReceiver = position(
-            "RECEIVER VPA", "PAYEE VPA", "BENEFICIARY VPA",
-            "RECEIVER", "PAYEE", "BENEFICIARY", "RECIPIENT", "MERCHANT", "TO ACCOUNT",
+            "RECEIVER VPA", "PAYEE VPA", "BENEFICIARY VPA", "TO VPA", "RECEIVER ADDRESS",
+            "PAYEE ADDRESS", "BENEFICIARY ADDRESS", "RECEIVER", "PAYEE", "BENEFICIARY",
+            "RECIPIENT", "MERCHANT NAME", "MERCHANT", "TO ACCOUNT",
             "CREDIT ACCOUNT", "COUNTERPARTY"
         )
         val receiver = explicitReceiver ?: if (!upper.contains("SENDER VPA") && !upper.contains("PAYER VPA")) {
@@ -175,8 +188,13 @@ object TransactionImportParser {
         }.joinToString(" ")
     }
 
-    private fun parseFirstAmountMinor(value: String): Long? =
-        MONEY_TOKEN.find(value)?.value?.let(::parseAmountMinor)
+    private fun parseFirstAmountMinor(value: String): Long? {
+        STRICT_MONEY_TOKEN.find(value)?.value?.let { return parseAmountMinor(it) }
+        val tokens = MONEY_TOKEN.findAll(value).map { it.value }.toList()
+        val single = tokens.singleOrNull() ?: return null
+        val digits = single.filter(Char::isDigit)
+        return if (digits.length <= 7) parseAmountMinor(single) else null
+    }
 
     private fun looksLikePdfFooter(line: String): Boolean {
         val upper = line.uppercase(Locale.ROOT)
@@ -193,16 +211,17 @@ object TransactionImportParser {
         val direct = DEBIT_AMOUNT.find(body)?.groups?.get(1)?.value
             ?: AMOUNT_DEBIT.find(body)?.groups?.get(1)?.value
             ?: signedDebit
-        if (direct != null) return parseAmountMinor(direct)?.let { kotlin.math.abs(it) }
-
-        val amounts = MONEY_TOKEN.findAll(body).mapNotNull { token ->
-            parseAmountMinor(token.value)?.let { kotlin.math.abs(it) }
-        }.toList()
-        return when {
-            amounts.isEmpty() -> null
-            amounts.size == 1 -> amounts.first()
-            else -> amounts[amounts.lastIndex - 1]
+        if (direct != null && isPlausibleMoneyToken(direct)) {
+            return parseAmountMinor(direct)?.let { kotlin.math.abs(it) }
         }
+
+        return null
+    }
+
+    private fun isPlausibleMoneyToken(value: String): Boolean {
+        val trimmed = value.trim()
+        if (STRICT_MONEY_TOKEN.matches(trimmed)) return true
+        return trimmed.filter(Char::isDigit).length <= 7
     }
 
     private fun parseXlsx(
@@ -268,11 +287,20 @@ object TransactionImportParser {
             }
 
             val description = cell(row, columns.description).orEmpty().trim()
-            val receiver = extractReceiverFromStructuredRow(row, columns, description, identifiers)
+            val parties = extractPartiesFromStructuredRow(row, columns, description, identifiers)
             val sourceCategory = cell(row, columns.category).orEmpty().trim()
             val category = knownCategories.firstOrNull { it.equals(sourceCategory, ignoreCase = true) }
-                ?: categorize("$sourceCategory $receiver $description")
-            rows += ParsedRow(date, outgoing, description, receiver, category)
+                ?: categorize("$sourceCategory ${parties.receiver} $description")
+            rows += ParsedRow(
+                date = date,
+                amountMinor = outgoing,
+                description = description,
+                sender = parties.sender,
+                receiver = parties.receiver,
+                senderMatchText = parties.senderMatchText,
+                receiverMatchText = parties.receiverMatchText,
+                category = category
+            )
         }
         return finalizeRows(sourceName, rows, ownIdentifiers, credits, unparsed)
     }
@@ -288,7 +316,8 @@ object TransactionImportParser {
         val candidates = rows.map { row ->
             val identity = row.receiver.ifBlank { inferCounterparty(row.description, allowPlainName = false) }
             val (groupKey, groupLabel) = groupIdentity(identity, row.description)
-            val ownTransfer = matchesOwnAccount(identity, identifiers)
+            val ownTransfer = matchesOwnAccount(row.senderMatchText, identifiers) &&
+                matchesOwnAccount(row.receiverMatchText.ifBlank { identity }, identifiers)
             val category = row.category ?: categorize("$identity ${row.description}")
             ImportCandidate(
                 importKey = hashOf(row.date.toEpochDay(), row.amountMinor, row.description, identity),
@@ -298,6 +327,7 @@ object TransactionImportParser {
                 amountMinor = row.amountMinor,
                 dateEpochDay = row.date.toEpochDay(),
                 note = row.description.take(120),
+                sender = row.sender.take(80),
                 receiver = identity.take(80),
                 categoryName = category
             )
@@ -316,27 +346,19 @@ object TransactionImportParser {
         )
     }
 
-    private fun matchesOwnAccount(receiver: String, identifiers: List<String>): Boolean {
-        if (receiver.isBlank()) return false
-        val receiverDigits = receiver.filter(Char::isDigit)
-        val receiverWords = receiver.replace(Regex("[^A-Za-z ]"), " ")
-            .replace(Regex("\\s+"), " ").trim().lowercase(Locale.ROOT)
+    private fun matchesOwnAccount(party: String, identifiers: List<String>): Boolean {
+        if (party.isBlank()) return false
+        val normalizedParty = normalize(party)
+        val partyDigits = party.filter(Char::isDigit)
         val ignoredNames = setOf("upi", "bank", "account", "receiver", "payee", "beneficiary")
         return identifiers.any { identifier ->
             val trimmed = identifier.trim()
             val configuredDigits = trimmed.filter(Char::isDigit)
-            // Match only when the identifier's digits are the trailing (masked-account-style)
-            // suffix of the receiver's digits - NOT anywhere inside it. A plain `.contains`
-            // here was flagging unrelated transactions as "own transfers" whenever a reference
-            // number, date, or amount happened to contain the same 4 digits by coincidence.
-            val lastFourMatch = configuredDigits.length >= 4 && receiverDigits.length >= 4 &&
-                receiverDigits.endsWith(configuredDigits.takeLast(4))
-            val configuredWords = trimmed.replace(Regex("[^A-Za-z ]"), " ")
-                .replace(Regex("\\s+"), " ").trim().lowercase(Locale.ROOT)
-            // Whole-word match on the padded strings, so a short configured name like "raj"
-            // can't match inside an unrelated longer word like "rajesh".
-            val nameMatch = configuredWords.length >= 4 && configuredWords !in ignoredNames &&
-                " $receiverWords ".contains(" $configuredWords ")
+            val lastFourMatch = configuredDigits.length >= 4 &&
+                partyDigits.contains(configuredDigits.takeLast(4))
+            val configuredName = trimmed.filter(Char::isLetter).lowercase(Locale.ROOT)
+            val nameMatch = configuredName.length >= 3 && configuredName !in ignoredNames &&
+                normalizedParty.contains(configuredName)
             lastFourMatch || nameMatch
         }
     }
@@ -367,19 +389,36 @@ object TransactionImportParser {
         }
     }
 
-    private fun extractReceiverFromStructuredRow(
+    private fun extractPartiesFromStructuredRow(
         row: List<String>,
         columns: Columns,
         description: String,
         ownIdentifiers: List<String>
-    ): String {
-        val sender = listOfNotNull(cell(row, columns.sourceName), cell(row, columns.sourceAccount))
+    ): ParsedParties {
+        val senderFromColumns = listOfNotNull(cell(row, columns.sourceName), cell(row, columns.sourceAccount))
             .joinToString(" ")
-        val explicitReceiver = cell(row, columns.receiver)
-            ?.let { inferCounterparty(it, allowPlainName = true) }
-            .orEmpty()
-        if (explicitReceiver.isNotBlank()) return explicitReceiver
-        return extractOutgoingReceiver(description, sender, ownIdentifiers)
+        val sender = inferCounterparty(senderFromColumns, allowPlainName = true).ifBlank {
+            extractSender(description)
+        }
+        val receiverFromColumn = cell(row, columns.receiver).orEmpty()
+        val explicitReceiver = inferCounterparty(receiverFromColumn, allowPlainName = true)
+        val receiver = explicitReceiver.ifBlank {
+            extractOutgoingReceiver(description, sender, ownIdentifiers)
+        }
+        return ParsedParties(
+            sender = sender,
+            receiver = receiver,
+            senderMatchText = senderFromColumns.ifBlank { sender },
+            receiverMatchText = receiverFromColumn.ifBlank { receiver }
+        )
+    }
+
+    private fun extractSender(narration: String): String {
+        val cleaned = narration.replace(Regex("\\s+"), " ").trim()
+        if (cleaned.isBlank()) return ""
+        val markedValue = SENDER_MARKER.find(cleaned)?.groups?.get(1)?.value.orEmpty()
+        if (markedValue.isBlank()) return ""
+        return inferCounterparty(markedValue.replace(TRAILING_MONEY, "").trim(), allowPlainName = true)
     }
 
     private fun inferCounterparty(value: String, allowPlainName: Boolean): String {
@@ -491,13 +530,14 @@ object TransactionImportParser {
             header == "to" || header.contains("receiver") || header.contains("payee") ||
                 header.contains("beneficiary") || header.contains("recipient") ||
                 header.contains("counterparty") || header == "vpa" || header == "upi" || header == "upiid" ||
-                header.contains("upiaddress") ||
+                header.contains("upiaddress") || header.contains("tovpa") ||
                 header.contains("toaccount") || header.contains("creditedto") ||
                 (header.contains("merchant") && !header.contains("category") && !header.contains("code"))
         }
         val sourceName = findWhere { header ->
             header.contains("sender") || header.contains("payer") || header.contains("accountholder") ||
-                header.contains("fromname") || header == "from" || header == "accountname" ||
+                header.contains("remitter") || header.contains("fromname") || header.contains("fromvpa") ||
+                header.contains("sourcevpa") || header == "from" || header == "accountname" ||
                 header == "customername"
         }
         val sourceAccount = findWhere { header ->
@@ -670,8 +710,18 @@ object TransactionImportParser {
         val date: LocalDate,
         val amountMinor: Long,
         val description: String,
+        val sender: String,
         val receiver: String,
+        val senderMatchText: String,
+        val receiverMatchText: String,
         val category: String?
+    )
+
+    private data class ParsedParties(
+        val sender: String,
+        val receiver: String,
+        val senderMatchText: String,
+        val receiverMatchText: String
     )
 
     private data class PdfLayout(
@@ -723,6 +773,11 @@ object TransactionImportParser {
     private val DEBIT_WORD = Regex("(?:^|\\b)(?:DR|DEBIT|WITHDRAWAL|PAID|OUTGOING)(?:\\b|$)")
     private val CREDIT_WORD = Regex("(?:^|\\b)(?:CR|CREDIT|DEPOSIT|RECEIVED|INCOMING)(?:\\b|$)")
     private val MONEY_TOKEN = Regex("(?:INR|₹)?\\s*[-(]?\\d[\\d,]*(?:\\.\\d{1,2})?[)]?", RegexOption.IGNORE_CASE)
+    private val STRICT_MONEY_TOKEN = Regex(
+        "(?:(?:INR|₹)\\s*[-(]?\\d[\\d,]*(?:\\.\\d{1,2})?[)]?|" +
+            "[-(]?\\d[\\d,]*\\.\\d{2}[)]?|[-(]?\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?[)]?)",
+        RegexOption.IGNORE_CASE
+    )
     private val NEGATIVE_AMOUNT = Regex("-\\s*(?:INR|₹)?\\s*\\d[\\d,]*(?:\\.\\d{1,2})?", RegexOption.IGNORE_CASE)
     private val DEBIT_AMOUNT = Regex("(?i)(?:DR|DEBIT|WITHDRAWAL|PAID)\\s*[:-]?\\s*(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)")
     private val AMOUNT_DEBIT = Regex("(?i)(?:INR|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:DR|DEBIT)")
@@ -735,6 +790,11 @@ object TransactionImportParser {
     private val RECEIVER_MARKER = Regex(
         "(?i)\\b(?:PAID TO|TRANSFERRED TO|TRANSFER TO|CREDITED TO|PAYEE|BENEFICIARY|RECEIVER|RECIPIENT|MERCHANT|TO)\\b" +
             "\\s*[:=/|-]?\\s*([^|,;]{3,80})"
+    )
+    private val SENDER_MARKER = Regex(
+        "(?i)\\b(?:DEBITED FROM|PAID BY|SENDER|PAYER|FROM)\\b\\s*[:=/|-]?\\s*" +
+            "(.{3,80}?)(?=\\b(?:PAID TO|TRANSFERRED TO|TRANSFER TO|CREDITED TO|TO|RECEIVER|PAYEE|" +
+            "BENEFICIARY|RECIPIENT|MERCHANT)\\b|[|,;]|$)"
     )
     private val MERCHANT_NARRATION = Regex(
         "(?i)\\b(?:POS|ECOM|PURCHASE|CARD)\\b(?:\\s+\\d+)?\\s*[-:/]?\\s*([A-Z][A-Z &.]{2,60})"

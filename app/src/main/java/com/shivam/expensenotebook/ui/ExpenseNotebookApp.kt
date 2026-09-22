@@ -1204,7 +1204,7 @@ private fun ImportScreen(
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Private, on-device import", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "PDF headers and outgoing-payment markers are used to separate sender from receiver. Groups use the receiver ID/name.",
+                        "PDF amounts come only from the dated row's debit/amount column. Sender and receiver are read separately; groups use the receiver ID/name.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1216,9 +1216,9 @@ private fun ImportScreen(
                 value = identifiers,
                 onValueChange = { identifiers = it.take(300) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("My names, UPI IDs or account last 4 digits") },
+                label = { Text("My internal-account keywords") },
                 supportingText = {
-                    Text("Separate entries with commas. Only receiver matches start unchecked; sender details are ignored.")
+                    Text("Names, UPI IDs or last 4 digits, separated by commas. A transfer is internal only when both sender and receiver match.")
                 },
                 minLines = 2,
                 maxLines = 3,
@@ -1374,7 +1374,7 @@ private fun ImportGroupRow(
                     )
                     if (likelyInternal) {
                         Text(
-                            if (selected) "Possible internal transfer · selected" else "Possible internal transfer · unchecked",
+                            if (selected) "Internal match (both parties) · selected" else "Internal match (both parties) · unchecked",
                             style = MaterialTheme.typography.bodySmall,
                             color = LocalFinanceColors.current.warning
                         )
@@ -1421,6 +1421,19 @@ private fun ImportGroupRow(
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(formatDate(LocalDate.ofEpochDay(transaction.dateEpochDay)), style = MaterialTheme.typography.bodySmall)
+                            val parties = listOfNotNull(
+                                transaction.sender.takeIf(String::isNotBlank)?.let { "From: $it" },
+                                transaction.receiver.takeIf(String::isNotBlank)?.let { "To: $it" }
+                            ).joinToString(" · ")
+                            if (parties.isNotBlank()) {
+                                Text(
+                                    parties,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Text(
                                 transaction.note.ifBlank { transaction.receiver },
                                 style = MaterialTheme.typography.bodySmall,
